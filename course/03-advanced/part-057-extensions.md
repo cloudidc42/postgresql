@@ -628,24 +628,7 @@ ERROR:  Wrong key or corrupt data
 
 ### ทางเลือกอัลกอริทึมและ compression
 
-`pgp_sym_encrypt` รับพารามิเตอร์เสริมเพื่อกำหนด cipher algorithm ได้:
-
-```sql
-SELECT pgp_sym_encrypt(
-    'sensitive data',
-    'passphrase',
-    'cipher-algo=aes256, compress-algo=1, compress-level=6'
-);
-```
-
-```
-                                      pgp_sym_encrypt
---------------------------------------------------------------------------------------------
- \x8c0d04...  (bytea, ใช้ AES-256 แทน default 3DES/CAST5)
-(1 row)
-```
-
-ค่า default ของ `pgp_sym_encrypt` คือ cipher `AES128` ซึ่งปลอดภัยเพียงพอสำหรับงานส่วนใหญ่ แต่หากนโยบายความปลอดภัยขององค์กรกำหนดให้ต้องใช้ AES-256 ก็ระบุ `cipher-algo=aes256` เพิ่มได้ตามตัวอย่าง
+`pgp_sym_encrypt` รับพารามิเตอร์เสริมเพื่อกำหนด cipher algorithm ได้ เช่น `SELECT pgp_sym_encrypt('data', 'passphrase', 'cipher-algo=aes256, compress-algo=1');` — ค่า default คือ cipher `AES128` ซึ่งปลอดภัยเพียงพอสำหรับงานส่วนใหญ่ แต่หากนโยบายความปลอดภัยขององค์กรกำหนดให้ต้องใช้ AES-256 ก็ระบุ `cipher-algo=aes256` เพิ่มได้ตามตัวอย่าง
 
 ### ข้อควรระวังสำคัญเรื่องการจัดการ key
 
@@ -1062,21 +1045,15 @@ SHOW shared_preload_libraries;
 (1 row)
 ```
 
-**ขั้นตอนที่ 4**: สร้าง extension ในแต่ละ database ที่ต้องการเก็บสถิติ
+**ขั้นตอนที่ 4**: สร้าง extension ในแต่ละ database ที่ต้องการเก็บสถิติ แล้วตรวจสอบ
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
-```
-
-```
-CREATE EXTENSION
-```
-
-```sql
 \dx pg_stat_statements
 ```
 
 ```
+CREATE EXTENSION
                                     List of installed extensions
         Name        | Version |   Schema   |                     Description
 ---------------------+---------+------------+-------------------------------------------------------
@@ -1091,29 +1068,21 @@ SELECT column_name, data_type
 FROM information_schema.columns
 WHERE table_name = 'pg_stat_statements'
 ORDER BY ordinal_position
-LIMIT 15;
+LIMIT 8;
 ```
 
 ```
-       column_name       |        data_type
---------------------------+---------------------------
- userid                   | oid
- dbid                     | oid
- toplevel                 | boolean
- queryid                  | bigint
- query                    | text
- plans                    | bigint
- total_plan_time          | double precision
- calls                    | bigint
- total_exec_time          | double precision
- min_exec_time            | double precision
- max_exec_time            | double precision
- mean_exec_time           | double precision
- stddev_exec_time         | double precision
- rows                     | bigint
- shared_blks_hit          | bigint
- shared_blks_read         | bigint
-(15 rows)
+    column_name    |     data_type
+---------------------+-------------------
+ queryid             | bigint
+ query               | text
+ calls               | bigint
+ total_exec_time     | double precision
+ mean_exec_time      | double precision
+ rows                | bigint
+ shared_blks_hit     | bigint
+ shared_blks_read    | bigint
+(8 rows)
 ```
 
 คอลัมน์สำคัญที่จะใช้บ่อยที่สุด:
