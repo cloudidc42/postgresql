@@ -291,24 +291,7 @@ pg_dump \
   -f backup.dump
 ```
 
-ตัวอย่างผล output เมื่อใช้ `-v`:
-
-```
-pg_dump: last built-in OID is 16383
-pg_dump: reading extensions
-pg_dump: identifying extension members
-pg_dump: reading schemas
-pg_dump: reading user-defined tables
-pg_dump: reading user-defined functions
-pg_dump: reading user-defined types
-pg_dump: reading indexes
-pg_dump: reading constraints
-pg_dump: reading triggers
-pg_dump: reading dumping out the contents of table "orders"
-pg_dump: dumping contents of table "public.orders"
-pg_dump: dumping contents of table "public.order_items"
-pg_dump: dumping contents of table "public.products"
-```
+เมื่อใช้ `-v` จะเห็น log ทีละขั้นตอน เช่น `pg_dump: reading schemas`, `pg_dump: dumping contents of table "public.orders"` ซึ่งมีประโยชน์มากเวลา debug ว่า dump ค้างอยู่ที่ตารางไหน
 
 ### ใช้ environment variable แทนการพิมพ์รหัสผ่านทุกครั้ง
 

@@ -1336,3 +1336,11 @@ sudo -u postgres ls /var/lib/postgresql/16/main/pg_wal/ | grep -E '^[0-9A-F]{24}
 หลักการสำคัญที่ต้องจำคือ ต้อง **เตรียมทุกอย่างให้พร้อมก่อน start server** (base backup + signal file + recovery parameters) เพราะเมื่อ start แล้ว PostgreSQL จะเข้าสู่กระบวนการ recovery ทันทีโดยอัตโนมัติ และควร **verify ก่อน promote เสมอ** เนื่องจากการ promote เป็นจุดที่ย้อนกลับไม่ได้ (สร้าง timeline ใหม่ทันที) หากพบว่าเลือกจุดเวลาไม่ถูกต้อง จะต้องเริ่มกระบวนการทั้งหมดใหม่ตั้งแต่ restore base backup อีกครั้ง
 
 </details>
+
+---
+
+## บทถัดไป
+
+บทนี้เน้นการกู้คืนข้อมูลแบบ "ตอบสนองเมื่อเกิดปัญหา" (reactive) ด้วยการ replay WAL จาก archive ในบทถัดไป เราจะขยายแนวคิด WAL ไปสู่การป้องกันปัญหาเชิงรุก (proactive) ด้วยการส่งสำเนาข้อมูลแบบ real-time ไปยังเซิร์ฟเวอร์สำรองที่พร้อมทำงานแทนได้ทันที
+
+**บทถัดไป:** [Part 063 — Streaming Replication](./part-063-streaming-replication.md)

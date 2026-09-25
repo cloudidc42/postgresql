@@ -731,9 +731,7 @@ aws rds restore-db-instance-from-db-snapshot \
 
 - ไม่ต้องการ (หรือไม่สามารถ) เข้ารหัสทั้ง disk เช่น environment แบบ shared hosting ที่ควบคุม infrastructure ไม่ได้เต็มที่
 - ต้องการป้องกัน**เฉพาะบาง column ที่อ่อนไหวที่สุด** โดยไม่กระทบ performance ของ column อื่นที่ต้อง query บ่อย (เช่น index scan บน column ทั่วไป)
-deriving ความปลอดภัยแบบ **defense in depth** — แม้ Encryption at Rest ระดับ disk จะถูกเจาะ (เช่น server ที่กำลังทำงานถูกแฮก) column ที่เข้ารหัสด้วย pgcrypto ยังต้องใช้ key แยกต่างหากถึงจะอ่านได้
-
-> **หมายเหตุ:** ย่อหน้าด้านบนมี glitch การพิมพ์ ("deriving") ขอแก้ไขเป็นประโยคที่ถูกต้อง: **เพื่อให้ได้ความปลอดภัยแบบ defense in depth** — แม้ Encryption at Rest ระดับ disk จะถูกเจาะ (เช่น server ที่กำลังทำงานถูกแฮก) column ที่เข้ารหัสด้วย pgcrypto ยังต้องใช้ key แยกต่างหากถึงจะอ่านได้
+- ต้องการความปลอดภัยแบบ **defense in depth** — แม้ Encryption at Rest ระดับ disk จะถูกเจาะ (เช่น server ที่กำลังทำงานถูกแฮก) column ที่เข้ารหัสด้วย pgcrypto ยังต้องใช้ key แยกต่างหากถึงจะอ่านได้
 
 ### เตรียม pgcrypto
 
