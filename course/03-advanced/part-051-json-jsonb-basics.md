@@ -1189,32 +1189,12 @@ ORDER BY all_keys_used;
 
 query นี้มีประโยชน์มากในการทำ **schema discovery** — เวลาเราสืบทอดตาราง JSONB ที่มีข้อมูลหลากหลายมาก่อน แล้วอยากรู้ว่าจริงๆ แล้วมี field อะไรบ้างที่เคยถูกใช้งาน
 
-### 2. `jsonb_each` — แตก object เป็นคู่ key-value (คืน key เป็น text, value เป็น jsonb)
+### 2. `jsonb_each` / `jsonb_each_text` — แตก object เป็นคู่ key-value
+
+`jsonb_each` คืน table 2 คอลัมน์: `key` (ชนิด `text`) และ `value` (ชนิด `jsonb` — ยังมี quote ครอบ string) ส่วน `jsonb_each_text` คืน `value` เป็น `text` ล้วน (ไม่มี quote ครอบ):
 
 ```sql
-SELECT *
-FROM jsonb_each(
-    (SELECT attributes FROM products WHERE product_id = 6)
-);
-```
-
-```
-    key    |   value
------------+------------
- color     | "navy"
- size      | "L"
- material  | "100% cotton"
- weight_kg | 0.2
-(4 rows)
-```
-
-`jsonb_each` คืน table 2 คอลัมน์: `key` (ชนิด `text`) และ `value` (ชนิด `jsonb`) — ถ้าต้องการ value เป็น `text` ตรงๆ (ไม่มี quote ครอบ string) ให้ใช้ `jsonb_each_text` แทน:
-
-```sql
-SELECT *
-FROM jsonb_each_text(
-    (SELECT attributes FROM products WHERE product_id = 6)
-);
+SELECT * FROM jsonb_each_text((SELECT attributes FROM products WHERE product_id = 6));
 ```
 
 ```
