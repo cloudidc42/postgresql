@@ -120,14 +120,14 @@
 
 | Part | Steps | หัวข้อ | สถานะ |
 |---|---|---|---|
-| 081 | 801–810 | PostgreSQL Internals: Process Architecture (Postmaster, Backend) | ⬜ |
-| 082 | 811–820 | Storage Engine: Heap, Page Layout, TOAST | ⬜ |
-| 083 | 821–830 | Write-Ahead Logging (WAL) เชิงลึก | ⬜ |
-| 084 | 831–840 | MVCC Internals เชิงลึก: Tuple Visibility, xmin/xmax | ⬜ |
-| 085 | 841–850 | การเขียน Custom Extension ด้วยภาษา C | ⬜ |
-| 086 | 851–860 | Query Planner Internals: Cost-based Optimization | ⬜ |
-| 087 | 861–870 | เชื่อมต่อ PostgreSQL กับ Node.js (node-postgres, Prisma) | ⬜ |
-| 088 | 871–880 | เชื่อมต่อ PostgreSQL กับ Python (psycopg, SQLAlchemy, Django ORM) | ⬜ |
+| 081 | 801–810 | PostgreSQL Internals: Process Architecture (Postmaster, Backend) | ✅ |
+| 082 | 811–820 | Storage Engine: Heap, Page Layout, TOAST | ✅ |
+| 083 | 821–830 | Write-Ahead Logging (WAL) เชิงลึก | ✅ |
+| 084 | 831–840 | MVCC Internals เชิงลึก: Tuple Visibility, xmin/xmax | ✅ |
+| 085 | 841–850 | การเขียน Custom Extension ด้วยภาษา C | ✅ |
+| 086 | 851–860 | Query Planner Internals: Cost-based Optimization | ✅ |
+| 087 | 861–870 | เชื่อมต่อ PostgreSQL กับ Node.js (node-postgres, Prisma) | ✅ |
+| 088 | 871–880 | เชื่อมต่อ PostgreSQL กับ Python (psycopg, SQLAlchemy, Django ORM) | ✅ |
 | 089 | 881–890 | เชื่อมต่อ PostgreSQL กับ Go (pgx, GORM) | ⬜ |
 | 090 | 891–900 | เชื่อมต่อ PostgreSQL กับ Java (JDBC, Hibernate/JPA) | ⬜ |
 | 091 | 901–910 | Database Design Patterns สำหรับสถาปัตยกรรม Microservices | ⬜ |
