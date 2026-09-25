@@ -584,4 +584,19 @@ pgsql-hackers เป็น mailing list หลักที่นักพัฒ�
 
 ---
 
+## เอกสารอ้างอิงเพิ่มเติม
+
+สำหรับผู้เรียนที่ต้องการศึกษาต่อเชิงลึกหลังจบบทนี้ ต่อไปนี้คือลิงก์อ้างอิงหลักที่กล่าวถึงตลอดบทเรียน รวบรวมไว้ในที่เดียวเพื่อความสะดวก:
+
+- Release notes ทางการ: https://www.postgresql.org/docs/release/
+- ข่าวสารทางการ: https://www.postgresql.org/about/news/
+- นโยบายวงจรชีวิตเวอร์ชัน (versioning policy): https://www.postgresql.org/support/versioning/
+- Planet PostgreSQL: https://planet.postgresql.org/
+- หน้าสมัครสมาชิก mailing list (รวมถึง pgsql-announce และ pgsql-hackers): https://www.postgresql.org/list/
+- เอกสารประกอบ (documentation) ฉบับเต็มของแต่ละเวอร์ชัน: https://www.postgresql.org/docs/
+
+ควรตรวจสอบลิงก์เหล่านี้เป็นระยะ เนื่องจากโครงสร้างเว็บไซต์อาจมีการปรับเปลี่ยนได้ตามกาลเวลา หากลิงก์ใดใช้งานไม่ได้ สามารถค้นหาผ่าน postgresql.org โดยตรงได้เสมอ
+
+---
+
 **บทถัดไป:** [Part 104 — Capstone: โครงการสุดท้าย](./part-104-capstone-final-project.md)
