@@ -911,75 +911,29 @@ FROM products WHERE product_id = 1;
 
 ### 5. `create_missing` — สร้าง key ใหม่ถ้ายังไม่มี
 
-ถ้า `create_missing = true` (ค่า default) และ path ที่ระบุยังไม่มีอยู่ใน JSONB, PostgreSQL จะ**สร้าง key นั้นขึ้นมาใหม่**:
+ถ้า `create_missing = true` (ค่า default) และ **key สุดท้าย** ของ path ที่ระบุยังไม่มีอยู่ใน JSONB, PostgreSQL จะสร้าง key นั้นขึ้นมาใหม่ให้ ถ้าตั้งเป็น `false` ค่าจะไม่เปลี่ยนแปลงเมื่อ key ยังไม่มี:
 
 ```sql
-SELECT jsonb_set(
-    '{"color":"red"}'::jsonb,
-    '{size}',
-    '"XL"',
-    true   -- create_missing = true (default)
-) AS with_new_key;
+SELECT
+    jsonb_set('{"color":"red"}'::jsonb, '{size}', '"XL"', true)  AS with_new_key,
+    jsonb_set('{"color":"red"}'::jsonb, '{size}', '"XL"', false) AS without_new_key;
 ```
 
 ```
-      with_new_key
--------------------------
- {"color": "red", "size": "XL"}
+          with_new_key           | without_new_key
+----------------------------------+-------------------
+ {"color": "red", "size": "XL"}  | {"color": "red"}
 (1 row)
 ```
 
-ถ้าตั้ง `create_missing = false` และ key ไม่มีอยู่จริง ค่าจะไม่เปลี่ยนแปลง (ไม่สร้างเพิ่ม):
-
-```sql
-SELECT jsonb_set(
-    '{"color":"red"}'::jsonb,
-    '{size}',
-    '"XL"',
-    false   -- ห้ามสร้าง key ใหม่
-) AS without_new_key;
-```
-
-```
-   without_new_key
------------------------
- {"color": "red"}
-(1 row)
-```
-
-> **ข้อควรระวัง**: ถ้า path ตรงกลางไม่มีอยู่จริง (เช่น อยากแก้ `{specs,battery}` แต่ `specs` เองยังไม่มีเลย) `jsonb_set` จะ **ไม่สร้างให้** แม้ `create_missing = true` เพราะมันสร้างได้แค่ key สุดท้ายของ path เท่านั้น ไม่ใช่ทั้งสาย path:
-
-```sql
-SELECT jsonb_set(
-    '{"color":"navy"}'::jsonb,   -- ไม่มี "specs" อยู่เลย
-    '{specs,battery}',
-    '"1000mAh"'
-) AS result;
-```
-
-```
-        result
------------------------
- {"color": "navy"}
-(1 row)
-```
-
-ไม่มีอะไรเปลี่ยนแปลง เพราะ path กลาง (`specs`) ไม่มีอยู่จริง ถ้าต้องการเพิ่ม nested object ใหม่ทั้งชั้น ให้ใส่ค่าทั้งก้อนที่ level แรกแทน:
-
-```sql
-SELECT jsonb_set(
-    '{"color":"navy"}'::jsonb,
-    '{specs}',
-    '{"battery":"1000mAh"}'
-) AS result;
-```
-
-```
-                result
----------------------------------------
- {"color": "navy", "specs": {"battery": "1000mAh"}}
-(1 row)
-```
+> **ข้อควรระวัง**: `create_missing` สร้างได้แค่ **key สุดท้ายของ path เท่านั้น** ถ้า path ตรงกลางไม่มีอยู่จริง (เช่น อยากแก้ `{specs,battery}` แต่ `specs` เองยังไม่มีเลย) `jsonb_set` จะ**ไม่สร้างให้** แม้ `create_missing = true`:
+>
+> ```sql
+> SELECT jsonb_set('{"color":"navy"}'::jsonb, '{specs,battery}', '"1000mAh"') AS result;
+> -- ผลลัพธ์: {"color": "navy"}  (ไม่เปลี่ยนแปลง เพราะ "specs" ไม่มีอยู่)
+> ```
+>
+> ถ้าต้องการเพิ่ม nested object ใหม่ทั้งชั้น ให้ใส่ค่าทั้งก้อนที่ level แรกแทน: `jsonb_set('{"color":"navy"}'::jsonb, '{specs}', '{"battery":"1000mAh"}')` จะได้ `{"color": "navy", "specs": {"battery": "1000mAh"}}`
 
 ### 6. ตัวอย่างใช้งานจริง — เพิ่มคูปองส่วนลดใหม่ให้คำสั่งซื้อที่ยังไม่มี
 
@@ -1045,18 +999,7 @@ FROM (
 (1 row)
 ```
 
-`to_jsonb` ยังใช้แปลง scalar เดี่ยวๆ ได้ด้วย เช่น:
-
-```sql
-SELECT to_jsonb(ARRAY[1,2,3]) AS arr, to_jsonb('hello'::text) AS str, to_jsonb(42) AS num;
-```
-
-```
-    arr    |   str   | num
------------+---------+------
- [1, 2, 3] | "hello" |   42
-(1 row)
-```
+`to_jsonb` ยังใช้แปลง scalar หรือ array เดี่ยวๆ ได้ด้วย เช่น `to_jsonb(ARRAY[1,2,3])` ให้ `[1, 2, 3]` และ `to_jsonb('hello'::text)` ให้ `"hello"`
 
 ### 3. `json_build_object` / `jsonb_build_object` — สร้าง JSON object กำหนดเอง
 
