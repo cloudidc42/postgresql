@@ -1161,4 +1161,169 @@ Read Replica ทำงานผ่านกลไก Streaming Replication ซ�
 </details>
 
 <details>
-<summary><strong>แบบฝึกหัดที่ 4:</strong> กำหนดให้ระบบมี transaction 200,000 ครั้งต่อวันในปัจจุบัน และเติบโตแบบ compound 15% ต่อเดือน จงคำนวณว่าอีก 6 เดือนข้างหน้า transaction ต่อวันจะเป็นเท่าไหร่ พร้อมเขียน SQL คำนวณ
+<summary><strong>แบบฝึกหัดที่ 4:</strong> กำหนดให้ระบบมี transaction 200,000 ครั้งต่อวันในปัจจุบัน และเติบโตแบบ compound 15% ต่อเดือน จงคำนวณว่าอีก 6 เดือนข้างหน้า transaction ต่อวันจะเป็นเท่าไหร่ พร้อมเขียน SQL คำนวณ</summary>
+
+**เฉลย:**
+
+สูตร: `Value(n) = Value(0) × (1 + r)^n`
+
+```
+Value(6) = 200,000 × (1 + 0.15)^6
+         = 200,000 × 2.313
+         ≈ 462,600 transaction ต่อวัน
+```
+
+```sql
+WITH params AS (
+    SELECT
+        200000::numeric AS current_daily_tx,
+        0.15::numeric   AS monthly_growth_rate
+)
+SELECT
+    n_month,
+    round(current_daily_tx * power(1 + monthly_growth_rate, n_month)) AS projected_daily_tx
+FROM params, generate_series(0, 6) AS n_month
+ORDER BY n_month;
+```
+
+ผลลัพธ์ที่เดือน 6 จะอยู่ที่ประมาณ 462,600 transaction ต่อวัน หรือเพิ่มขึ้นราว 2.3 เท่าจากปัจจุบัน ทีมงานควรใช้ตัวเลขนี้ตรวจสอบว่าเครื่องปัจจุบันจะรองรับ write throughput ระดับนี้ได้หรือไม่ และวางแผน scale ล่วงหน้าตามนั้น
+
+</details>
+
+<details>
+<summary><strong>แบบฝึกหัดที่ 5:</strong> อธิบายว่าทำไม Write Scaling ถึงยากกว่า Read Scaling โดยเชื่อมโยงกับแนวคิดเรื่อง WAL (Write-Ahead Log) และ Single Writer Constraint</summary>
+
+**เฉลย:**
+
+Write Scaling ยากกว่าเพราะเหตุผลหลัก 2 ประการที่เชื่อมโยงกัน:
+
+1. **Single Writer Constraint**: ในสถาปัตยกรรม Primary-Replica ของ PostgreSQL มีเพียง Primary node เดียวเท่านั้นที่รับ write ได้ เพื่อป้องกันความขัดแย้งของข้อมูล (write conflict) ระหว่างหลาย node ดังนั้นไม่ว่าจะเพิ่ม replica กี่ตัว write capacity รวมของระบบก็ยังคงถูกจำกัดด้วยความสามารถของ Primary node เพียงตัวเดียว ต่างจาก read ที่กระจายไปหลาย replica ได้อย่างอิสระ เพราะการอ่านไม่เปลี่ยนแปลงข้อมูล
+
+2. **WAL เป็น Sequential Write**: ทุก transaction ที่เขียนข้อมูลต้องถูกบันทึกลง Write-Ahead Log ก่อนเสมอ (เพื่อรับประกัน durability ตามหลัก ACID) และ WAL ต้องเขียนแบบเรียงลำดับ (sequential) ไม่สามารถขนานกันได้อย่างอิสระเหมือนการอ่าน ทำให้ write throughput ถูกจำกัดด้วยความเร็วสูงสุดที่ disk เขียน WAL ได้ตามลำดับ (sequential write speed) ซึ่งเป็นคอขวดทางฟิสิกส์ที่ไม่สามารถแก้ได้ด้วยการเพิ่ม node เฉยๆ
+
+ด้วยเหตุนี้ การ scale write ที่แท้จริงจึงต้องอาศัยการแบ่งข้อมูล (sharding) ให้แต่ละ node มี WAL และ Primary เป็นของตัวเอง รับผิดชอบเฉพาะข้อมูลส่วนของตน แทนที่จะพึ่งพา Primary ตัวเดียวรับ write ทั้งหมด
+
+</details>
+
+<details>
+<summary><strong>แบบฝึกหัดที่ 6:</strong> เขียน SQL เพื่อตรวจสอบว่ามี "idle in transaction" session ค้างอยู่นานเกิน 5 นาทีหรือไม่ และอธิบายว่าทำไม session ประเภทนี้ถึงเป็นอันตรายต่อ Connection Capacity</summary>
+
+**เฉลย:**
+
+```sql
+SELECT
+    pid,
+    application_name,
+    client_addr,
+    now() - state_change AS idle_duration,
+    query
+FROM pg_stat_activity
+WHERE state = 'idle in transaction'
+  AND now() - state_change > interval '5 minutes'
+ORDER BY idle_duration DESC;
+```
+
+Session ที่อยู่ในสถานะ `idle in transaction` คือ session ที่เปิด transaction ไว้แล้ว (เช่น รัน `BEGIN;` แล้ว) แต่ไม่ได้ทำงานอะไรต่อ (ไม่ commit หรือ rollback) ปัญหาคือ:
+
+1. **จับจอง connection slot ไว้โดยไม่ทำงานจริง** — ทำให้ connection ที่เหลือใน pool น้อยลงโดยไม่จำเป็น เพิ่มความเสี่ยงที่ connection จะเต็มเร็วกว่าที่ควร
+2. **บล็อก autovacuum และ VACUUM** — transaction ที่ค้างนานจะทำให้ PostgreSQL ไม่สามารถ clean up dead tuple ที่เกี่ยวข้องได้ (เพราะ transaction ID ยังคง "active" อยู่) ทำให้เกิด table bloat สะสม
+3. **เสี่ยงต่อ lock contention** — หาก transaction นั้นถือ lock บาง row/table ไว้ transaction อื่นที่ต้องการแก้ไขข้อมูลเดียวกันจะต้องรอ
+
+การแก้ไขทำได้โดยตั้งค่า `idle_in_transaction_session_timeout` เพื่อให้ PostgreSQL ตัด session ประเภทนี้อัตโนมัติเมื่อค้างเกินเวลาที่กำหนด
+
+</details>
+
+<details>
+<summary><strong>แบบฝึกหัดที่ 7:</strong> ทีมงานพบว่า `max_connections` ตั้งไว้ที่ 500 บนเครื่อง 8 CPU core และ RAM เริ่มถูกใช้งานสูงแม้ traffic ไม่ได้เยอะมาก จงวิเคราะห์ปัญหาและเสนอแนวทางแก้ไข</summary>
+
+**เฉลย:**
+
+ปัญหา: ด้วยสูตรประมาณค่า `max_connections` ที่เหมาะสม (`CPU core × 2-4 + background + reserved`) สำหรับเครื่อง 8 core ค่าที่เหมาะสมควรอยู่ราว 30-40 connection เท่านั้น การตั้งไว้ที่ 500 สูงเกินความจำเป็นไปมาก เพราะ:
+
+1. แต่ละ connection ใน PostgreSQL คือ 1 OS process แยกกัน ซึ่งกิน RAM base overhead แม้จะ idle อยู่ก็ตาม (ไม่ใช่ lightweight thread แบบบางระบบ)
+2. เมื่อมี concurrent active connection มากเกินจำนวน CPU core จริง จะเกิด context switching ระหว่าง process ถี่ขึ้น ทำให้ throughput โดยรวมลดลงแทนที่จะเพิ่มขึ้น (CPU เสียเวลาสลับ process แทนที่จะประมวลผล query จริง)
+
+แนวทางแก้ไข:
+- ติดตั้ง **PgBouncer** ในโหมด transaction pooling ระหว่างแอปพลิเคชันกับ PostgreSQL เพื่อให้แอปพลิเคชันเชื่อมต่อ PgBouncer ได้เต็มที่ (หลักร้อยถึงพัน connection) แต่ physical connection ไปยัง PostgreSQL จริงลดเหลือเพียง 30-50 connection
+- ลด `max_connections` ที่ PostgreSQL ลงมาให้สอดคล้องกับจำนวน CPU core จริง (เช่น 50-100 พร้อม margin)
+- ตรวจสอบว่าแอปพลิเคชันมี connection leak หรือไม่ (เช่น ไม่ได้ปิด connection หลังใช้งาน) ซึ่งมักเป็นสาเหตุที่ทำให้ทีมตั้ง `max_connections` สูงเกินจริงเพื่อ "กันปัญหา" แทนที่จะแก้ที่ต้นเหตุ
+
+</details>
+
+<details>
+<summary><strong>แบบฝึกหัดที่ 8:</strong> จงอธิบายความแตกต่างระหว่าง Hash-based Sharding และ Range-based Sharding พร้อมยกตัวอย่างว่าแต่ละแบบเหมาะกับ use case แบบไหน</summary>
+
+**เฉลย:**
+
+- **Hash-based Sharding**: ใช้ hash function กับ shard key แล้วกระจายผลลัพธ์ไปยัง shard ต่างๆ (เช่น `hash(customer_id) % จำนวน_shard`) ข้อดีคือกระจายข้อมูลได้สม่ำเสมอมาก ลดโอกาสเกิด hotspot (shard ใด shard หนึ่งมีข้อมูล/โหลดมากผิดปกติ) เหมาะกับระบบที่ query ส่วนใหญ่เป็นการค้นหาด้วย key เดียว (point lookup) เช่น ระบบ user profile ที่ query ด้วย `user_id` เป็นหลัก แต่ข้อเสียคือ range query (เช่น "ดึงข้อมูลทั้งหมดของเดือนนี้") จะกระจายไปทุก shard เพราะ hash ทำให้ข้อมูลที่ควรอยู่ใกล้กันถูกกระจายแบบสุ่ม
+
+- **Range-based Sharding**: แบ่งข้อมูลตามช่วงของค่า key (เช่น customer_id 1-1,000,000 อยู่ shard 1, 1,000,001-2,000,000 อยู่ shard 2) ข้อดีคือ range query มีประสิทธิภาพดีมาก เพราะข้อมูลที่อยู่ใกล้กันมักอยู่ shard เดียวกัน เหมาะกับระบบที่ query แบบช่วงเวลาบ่อย เช่น ระบบ log/time-series ที่แบ่งตามช่วงเวลา แต่ข้อเสียคือเสี่ยงเกิด hotspot ได้ง่าย เช่น หากข้อมูลใหม่ถูกสร้างต่อเนื่อง (auto-increment id) shard ล่าสุดจะรับโหลดสูงกว่า shard เก่าเสมอ
+
+สรุป: เลือก Hash-based เมื่อต้องการกระจายโหลดสม่ำเสมอและ query ส่วนใหญ่เป็น point lookup ส่วน Range-based เหมาะเมื่อ query ส่วนใหญ่เป็น range scan ตามลำดับของ key
+
+</details>
+
+<details>
+<summary><strong>แบบฝึกหัดที่ 9:</strong> เขียนขั้นตอน Load Testing แบบ ramp-up สำหรับระบบที่ปัจจุบันรองรับ 1,000 TPS และต้องการยืนยันว่ารองรับ 5,000 TPS ได้ก่อนวัน campaign ใหญ่ พร้อมระบุ metric ที่ต้อง monitor ระหว่างทดสอบ</summary>
+
+**เฉลย:**
+
+ขั้นตอน Ramp-up Load Test:
+
+1. **เตรียม environment** — ใช้ staging ที่มี spec เดียวกับ production จริง และมีข้อมูลปริมาณใกล้เคียงของจริง (ไม่ใช่ database ว่างเปล่า)
+2. **Reset baseline statistics** — รัน `pg_stat_statements_reset()` และบันทึกค่า `pg_stat_bgwriter` ก่อนเริ่ม
+3. **Ramp-up แบบขั้นบันได** — เริ่มทดสอบที่ 1,000 TPS (baseline) → 2,000 TPS → 3,000 TPS → 4,000 TPS → 5,000 TPS โดยแต่ละขั้นรันต่อเนื่องอย่างน้อย 5-10 นาที เพื่อให้เห็น trend ที่ชัดเจน ไม่ใช่ spike ชั่วคราว
+4. **บันทึกผลแต่ละขั้น** — TPS จริงที่ทำได้, latency average/p95/p99, error rate
+5. **หา knee point** — จุดที่ latency เริ่มแย่ลงอย่างมีนัยสำคัญ (เช่น p99 latency พุ่งจาก 50ms เป็น 500ms) คือจุดที่ระบบเริ่มอิ่มตัว
+6. **เปรียบเทียบกับเป้าหมาย** — ถ้า knee point เกิดก่อนถึง 5,000 TPS แสดงว่าต้อง optimize เพิ่มก่อนวันงานจริง
+
+Metric ที่ต้อง monitor ระหว่างทดสอบ:
+- CPU utilization และ load average
+- Cache hit ratio (`pg_stat_database`)
+- Checkpoint frequency และ write time (`pg_stat_bgwriter`)
+- Lock contention / blocking chain (`pg_locks`, `pg_stat_activity`)
+- Temp file usage (สัญญาณว่า `work_mem` ไม่พอ)
+- Replication lag (ถ้ามีการทดสอบ read replica ด้วย)
+- Connection pool saturation (PgBouncer stats)
+
+</details>
+
+<details>
+<summary><strong>แบบฝึกหัดที่ 10:</strong> องค์กรของคุณมีฐานข้อมูลขนาด 500GB เติบโต 10% ต่อเดือนแบบทบต้น และมีนโยบายเก็บข้อมูลตามกฎหมายไว้ 3 ปี หลังจากนั้นสามารถ archive ออกได้ จงออกแบบกลยุทธ์ partitioning และ archive เบื้องต้น พร้อมประมาณขนาด storage ที่ต้องเตรียมในอีก 12 เดือนข้างหน้า (ก่อนที่ archive policy จะเริ่มมีผลลดขนาดข้อมูลลง เนื่องจากข้อมูลยังไม่ถึงอายุ 3 ปี)</summary>
+
+**เฉลย:**
+
+**ประมาณ storage ใน 12 เดือนข้างหน้า:**
+
+```sql
+WITH params AS (
+    SELECT 500.0::numeric AS current_gb, 0.10::numeric AS monthly_growth_rate
+)
+SELECT
+    n_month,
+    round(current_gb * power(1 + monthly_growth_rate, n_month), 1) AS projected_gb
+FROM params, generate_series(0, 12, 3) AS n_month
+ORDER BY n_month;
+```
+
+ผลลัพธ์โดยประมาณ: เดือน 0 = 500GB, เดือน 3 ≈ 665GB, เดือน 6 ≈ 886GB, เดือน 9 ≈ 1,179GB, เดือน 12 ≈ 1,569GB
+
+เนื่องจาก policy เก็บข้อมูล 3 ปี (36 เดือน) ข้อมูลที่มีอยู่ในปัจจุบันทั้งหมดยังไม่ถึงอายุที่ archive ได้ในช่วง 12 เดือนแรกนี้ (ยกเว้นข้อมูลที่มีอายุใกล้ 3 ปีอยู่แล้วตั้งแต่ก่อนเริ่มนับ) ดังนั้นต้องเตรียม storage รองรับ ~1,569GB บวก safety margin 30% (สำหรับ index, WAL, temp) ≈ **2,000-2,100 GB**
+
+**กลยุทธ์ Partitioning และ Archive:**
+
+1. แปลงตารางหลัก (เช่น transaction, order) เป็น **range partition ตามเดือน** (ตามที่สอนใน Part 054) เพื่อให้จัดการข้อมูลแต่ละช่วงเวลาแยกจากกันได้
+2. ตั้ง policy สามชั้น:
+   - อายุ 0-6 เดือน: เก็บใน primary storage (NVMe/SSD) เพื่อ performance สูงสุด
+   - อายุ 6 เดือน - 3 ปี: ย้ายไป tablespace บน storage ที่ถูกกว่า (`ALTER TABLE ... SET TABLESPACE`) แต่ยัง query ได้ผ่านฐานข้อมูลหลัก
+   - อายุเกิน 3 ปี: `DETACH PARTITION` แล้ว export เป็น cold storage (เช่น object storage) ก่อน `DROP TABLE` เพื่อปลดปล่อยพื้นที่
+3. เขียน automated job (เช่นผ่าน `pg_cron` หรือ scheduler ภายนอก) ให้สร้าง partition ใหม่ล่วงหน้าทุกเดือน และรัน archive job ตาม policy โดยอัตโนมัติ ไม่พึ่งพาการทำ manual
+4. Monitor ขนาด partition แต่ละตัวเป็นระยะ (ด้วย query ใน Step 747) เพื่อยืนยันว่า archive policy ทำงานได้ผลจริง และปรับ forecast ใหม่หากอัตราการเติบโตเปลี่ยนไป
+
+ข้อสังเกตสำคัญ: ในปีแรกนี้ archive policy ยังไม่ช่วยลดขนาด storage ที่ต้องเตรียมมากนัก (เพราะข้อมูลยังไม่ถึงอายุ 3 ปี) แต่การวาง partitioning ไว้ตั้งแต่ต้นทำให้การ archive ในปีถัดๆ ไปทำได้ง่ายและรวดเร็วมาก แทนที่จะต้องมาสร้าง partition ย้อนหลังบนตารางขนาดใหญ่ในอนาคต
+
+</details>
+
+---
+
+**บทถัดไป:** [Part 076 — PostGIS Basics](./part-076-postgis-basics.md)
