@@ -652,43 +652,29 @@ FROM products WHERE product_id = 1;
 (1 row)
 ```
 
-### 6. ใช้ `->>` ใน WHERE clause เพื่อ filter สินค้า
+### 5. ใช้ `->>` ใน `WHERE` clause เพื่อ filter สินค้า
+
+`->>` ใช้ใน `WHERE` ได้เหมือนคอลัมน์ทั่วไป และเมื่อเปรียบเทียบกับ boolean/number จริงๆ ต้อง cast กลับให้ตรงชนิด (เพราะ `->>` คืน `text` เสมอ):
 
 ```sql
 SELECT product_name, unit_price, attributes ->> 'color' AS color
 FROM products
-WHERE attributes ->> 'color' = 'black';
+WHERE attributes ->> 'color' = 'black'
+   OR (attributes -> 'specs' ->> '5g')::boolean = true;
 ```
 
 ```
-      product_name      | unit_price | color
---------------------------+------------+--------
- Samsung Galaxy S24 Ultra |   39900.00 | black
- Sony WH-1000XM5 Headphones |  12900.00 | black
- Women's Yoga Pants       |     690.00 | black
- Wireless Mouse           |     590.00 | black
-(4 rows)
+      product_name        | unit_price | color
+----------------------------+------------+--------
+ iPhone 15 Pro Max         |   42900.00 |
+ Samsung Galaxy S24 Ultra  |   39900.00 | black
+ Sony WH-1000XM5 Headphones|   12900.00 | black
+ Women's Yoga Pants        |     690.00 | black
+ Wireless Mouse            |     590.00 | black
+(5 rows)
 ```
 
-### 7. ใช้กับ nested field ใน WHERE — filter สินค้าที่มี 5G
-
-เนื่องจาก `->>` คืน `text` เสมอ เวลาเปรียบเทียบกับ boolean/number จริงๆ ต้อง cast กลับให้ตรงชนิด:
-
-```sql
-SELECT product_name, attributes -> 'specs' ->> '5g' AS has_5g
-FROM products
-WHERE (attributes -> 'specs' ->> '5g')::boolean = true;
-```
-
-```
-     product_name     | has_5g
------------------------+---------
- iPhone 15 Pro Max     | true
- Samsung Galaxy S24 Ultra | true
-(2 rows)
-```
-
-### 8. ใช้กับ `orders.metadata` — ดึง referrer และ coupon
+### 6. ใช้กับ `orders.metadata` — ดึง referrer และ coupon
 
 ```sql
 SELECT order_id, status, metadata ->> 'referrer' AS referrer, metadata ->> 'coupon_code' AS coupon
