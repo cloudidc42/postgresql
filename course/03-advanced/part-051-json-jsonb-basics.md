@@ -1370,42 +1370,20 @@ field เดิมทั้งหมดยังอยู่ครบ เพิ�
 
 ### 3. `-` — ลบ key ออกจาก JSONB object
 
-Operator `-` (ชนิด `jsonb - text`) ลบ key ที่ระบุออกจาก object ระดับบนสุด:
+Operator `-` ลบ key/element ระดับบนสุดออกจาก JSONB มีสามรูปแบบตามชนิดของ operand ขวามือ: `jsonb - text` (ลบ 1 key), `jsonb - text[]` (ลบหลาย key), และ `jsonb - int` (ลบ array element ตาม index):
 
 ```sql
-SELECT '{"color":"navy","size":"L","material":"cotton"}'::jsonb - 'material' AS result;
+SELECT
+    '{"color":"navy","size":"L","material":"cotton"}'::jsonb - 'material' AS remove_one_key,
+    '{"color":"navy","size":"L","material":"cotton","weight_kg":0.2}'::jsonb - ARRAY['material','weight_kg'] AS remove_many_keys,
+    '["a","b","c"]'::jsonb - 1 AS remove_array_index;
 ```
 
 ```
-              result
------------------------------
- {"color": "navy", "size": "L"}
-```
-
-**ลบหลาย key พร้อมกัน** ด้วย `-` และ text array (`jsonb - text[]`):
-
-```sql
-SELECT '{"color":"navy","size":"L","material":"cotton","weight_kg":0.2}'::jsonb
-       - ARRAY['material', 'weight_kg']
-       AS result;
-```
-
-```
-              result
------------------------------
- {"color": "navy", "size": "L"}
-```
-
-**ลบ element ออกจาก array ตาม index** ด้วย `-` และ integer (`jsonb - int`):
-
-```sql
-SELECT '["a","b","c"]'::jsonb - 1 AS result;  -- ลบ index 1 คือ "b"
-```
-
-```
-   result
-------------
- ["a", "c"]
+       remove_one_key       |      remove_many_keys      | remove_array_index
+------------------------------+-------------------------------+---------------------
+ {"color":"navy","size":"L"} | {"color":"navy","size":"L"}  | ["a", "c"]
+(1 row)
 ```
 
 **ลบ field ที่ซ้อนลึก** ต้องใช้ operator `#-` (path-based delete) แทน เพราะ `-` ทำได้แค่ระดับบนสุด:
