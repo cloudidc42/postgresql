@@ -76,16 +76,16 @@
 | 048 | 471–480 | Triggers และ Trigger Functions | ✅ |
 | 049 | 481–490 | Custom Data Types, Domains, ENUM | ✅ |
 | 050 | 491–500 | Arrays: การสร้าง จัดเก็บ และ Query | ✅ |
-| 051 | 501–510 | JSON และ JSONB พื้นฐาน | ⬜ |
-| 052 | 511–520 | JSONB Query ขั้นสูงและ Indexing (GIN) | ⬜ |
-| 053 | 521–530 | Full Text Search (tsvector, tsquery, ranking) | ⬜ |
-| 054 | 531–540 | Table Partitioning: Range, List, Hash Partitioning | ⬜ |
-| 055 | 541–550 | Table Inheritance และเปรียบเทียบกับ Partitioning | ⬜ |
-| 056 | 551–560 | Foreign Data Wrappers (postgres_fdw, file_fdw) | ⬜ |
-| 057 | 561–570 | Extensions ที่สำคัญ: pg_stat_statements, pgcrypto, uuid-ossp, pg_trgm | ⬜ |
-| 058 | 571–580 | MVCC เชิงลึก: Locking และ Concurrency Control | ⬜ |
-| 059 | 581–590 | Deadlock: สาเหตุ การตรวจจับ และการป้องกัน | ⬜ |
-| 060 | 591–600 | VACUUM, AUTOVACUUM และการจัดการ Bloat — พร้อมโปรเจกต์ Analytics Dashboard | ⬜ |
+| 051 | 501–510 | JSON และ JSONB พื้นฐาน | ✅ |
+| 052 | 511–520 | JSONB Query ขั้นสูงและ Indexing (GIN) | ✅ |
+| 053 | 521–530 | Full Text Search (tsvector, tsquery, ranking) | ✅ |
+| 054 | 531–540 | Table Partitioning: Range, List, Hash Partitioning | ✅ |
+| 055 | 541–550 | Table Inheritance และเปรียบเทียบกับ Partitioning | ✅ |
+| 056 | 551–560 | Foreign Data Wrappers (postgres_fdw, file_fdw) | ✅ |
+| 057 | 561–570 | Extensions ที่สำคัญ: pg_stat_statements, pgcrypto, uuid-ossp, pg_trgm | ✅ |
+| 058 | 571–580 | MVCC เชิงลึก: Locking และ Concurrency Control | ✅ |
+| 059 | 581–590 | Deadlock: สาเหตุ การตรวจจับ และการป้องกัน | ✅ |
+| 060 | 591–600 | VACUUM, AUTOVACUUM และการจัดการ Bloat — พร้อมโปรเจกต์ Analytics Dashboard | ✅ |
 
 ## 🟠 ระดับ 4: ระดับมืออาชีพ (Professional) — Step 601–800
 

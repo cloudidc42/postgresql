@@ -588,7 +588,7 @@ SELECT
     email,
     pgp_sym_decrypt(national_id_encrypted, 'app-secret-passphrase-2026') AS national_id
 FROM customers
-WHERE customer_id <= 5;
+WHERE customer_id <= 3;
 ```
 
 ```
@@ -597,9 +597,7 @@ WHERE customer_id <= 5;
            1 | somchai.j@example.com    | 1000000000001
            2 | suda.b@example.com       | 1000000000002
            3 | anan.w@example.com       | 1000000000003
-           4 | malee.s@example.com      | 1000000000004
-           5 | piti.c@example.com       | 1000000000005
-(5 rows)
+(3 rows)
 ```
 
 ถ้าใส่ passphrase ผิด PostgreSQL จะโยน error ทันที (ป้องกันการเดาสุ่ม):
