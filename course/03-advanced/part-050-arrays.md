@@ -121,26 +121,6 @@ INSERT INTO suppliers (supplier_name, country) VALUES
 
 -- products (พร้อม tags)
 INSERT INTO products (product_name, category_id, supplier_id, unit_price, stock_quantity, is_active, tags) VALUES
-    ('Wireless Mouse M1',            2, 2, 350.00,  120, true,  ARRAY['bestseller','wireless']),
-    ('Mechanical Keyboard K80',      2, 1, 2190.00,  45, true,  ARRAY['bestseller','gaming','new-arrival']),
-    ('27-inch 4K Monitor',           2, 2, 9990.00,  20, true,  ARRAY['premium']),
-    ('Smartphone X12 128GB',         3, 2, 12900.00, 60, true,  ARRAY['bestseller','new-arrival']),
-    ('Smartphone X12 Case',          3, 2, 199.00,  200, true,  ARRAY['accessory','eco-friendly']),
-    ('Bluetooth Earbuds Pro',        1, 9, 1590.00,  80, true,  ARRAY['bestseller','wireless','new-arrival']),
-    ('Stainless Steel Water Bottle', 5, 4, 290.00,  150, true,  ARRAY['eco-friendly','bestseller']),
-    ('Non-stick Frying Pan 28cm',    5, 4, 690.00,   70, true,  ARRAY['kitchen'],
-    ('Bamboo Cutting Board',         5, 3, 250.00,   90, true,  ARRAY['eco-friendly']),
-    ('Ceramic Coffee Mug Set',       5, 4, 450.00,   60, true,  ARRAY['new-arrival']),
-    ('Men Slim Fit Shirt',           7, 5, 590.00,  100, true,  ARRAY['new-arrival'])
-;
-```
-
-หมายเหตุ: บรรทัดที่มีวงเล็บไม่ปิด (`ARRAY['kitchen']` ที่ขาดปีกกาปิดในตัวอย่างข้างต้น) เป็นความผิดพลาดที่ผู้เรียนควรฝึกสังเกต — ในสคริปต์จริงด้านล่างนี้เราจะเขียนให้ถูกต้องครบถ้วนทั้งหมดในคำสั่งเดียว เพื่อให้ copy ไปรันได้ทันที
-
-```sql
-TRUNCATE products RESTART IDENTITY CASCADE;
-
-INSERT INTO products (product_name, category_id, supplier_id, unit_price, stock_quantity, is_active, tags) VALUES
     ('Wireless Mouse M1',            2, 2,   350.00, 120, true,  ARRAY['bestseller','wireless']),
     ('Mechanical Keyboard K80',      2, 1,  2190.00,  45, true,  ARRAY['bestseller','gaming','new-arrival']),
     ('27-inch 4K Monitor',           2, 2,  9990.00,  20, true,  ARRAY['premium']),
