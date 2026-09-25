@@ -983,3 +983,119 @@ default_pool_size = 25          ;; server connection จริงไปยัง
 หลักการคือ `max_client_conn` ควรสูงกว่า `default_pool_size` มาก เพราะจุดประสงค์ของ pooling คือให้ client จำนวนมาก "แชร์" การใช้ server connection จำนวนน้อยกว่าอย่างมีประสิทธิภาพ
 
 </details>
+
+<details>
+<summary><b>แบบฝึกหัดที่ 5</b>: ทีมพัฒนารายงานว่า advisory lock (`pg_advisory_lock`) ที่ใช้ป้องกันการประมวลผล order ซ้ำ (idempotency guard) ทำงานผิดปกติหลังย้ายไปใช้ PgBouncer ในโหมด transaction pooling สาเหตุคืออะไร และควรแก้ไขอย่างไร</summary>
+
+**เฉลย**:
+
+สาเหตุ: advisory lock ผูกอยู่กับ **server connection** (session) ไม่ใช่ transaction ใน `pool_mode = transaction` แต่ละ transaction ของ client อาจถูกส่งไปยัง server connection คนละตัวกันในแต่ละครั้ง ทำให้:
+- `pg_advisory_lock()` ที่ถูกเรียกใน transaction แรก อาจไป lock ไว้ที่ server connection ตัวหนึ่ง แล้วถูกคืนกลับ pool พร้อม lock ที่ยังค้างอยู่ (ไม่ถูกปลดเมื่อ transaction จบ เพราะ advisory lock ไม่ผูกกับ transaction โดย default)
+- Client ตัวอื่นที่ได้ server connection ตัวเดียวกันมาในรอบถัดไป จะพบว่า connection นั้น "ถือ lock" อยู่ทั้งที่ตัวเองไม่ได้ขอ ทำให้ตรวจสอบ lock ผิดพลาด หรือปลด lock ไม่ได้ตรงตามที่ตั้งใจ
+
+วิธีแก้ไข:
+1. ใช้ **transaction-level advisory lock** แทน คือ `pg_advisory_xact_lock()` ซึ่งจะถูกปลดอัตโนมัติเมื่อ transaction จบ (commit/rollback) — ปลอดภัยกับ transaction pooling
+2. หรือถ้าจำเป็นต้องใช้ session-level advisory lock จริงๆ ให้แยก pool สำหรับ use case นี้เป็น `pool_mode = session` โดยเฉพาะ
+3. สำหรับ use case ป้องกัน order ซ้ำ ควรพิจารณาใช้วิธีอื่นที่เหมาะกับ pooling มากกว่า เช่น unique constraint บนตาราง `orders` (เช่น unique index บน `idempotency_key`) แทนการพึ่ง advisory lock
+
+</details>
+
+<details>
+<summary><b>แบบฝึกหัดที่ 6</b>: อธิบายว่าทำไม `server_lifetime` และ `server_idle_timeout` ถึงสำคัญ และจะเกิดอะไรขึ้นถ้าไม่ตั้งค่าทั้งสองนี้เลย (ปล่อยเป็นค่า unlimited) ในระบบที่รันต่อเนื่อง 24/7</summary>
+
+**เฉลย**:
+
+- `server_lifetime` กำหนดอายุสูงสุดของ server connection ก่อนถูก recycle แม้จะยังใช้งานได้ปกติ
+- `server_idle_timeout` ปิด server connection ที่ไม่ได้ใช้งาน (idle) นานเกินกำหนด
+
+ถ้าไม่ตั้งค่าทั้งสอง (ปล่อย unlimited):
+1. Server connection บางตัวอาจมีอายุยาวนานมาก (หลายเดือน) โดยไม่เคยถูกปิดเลย ซึ่งอาจสะสมปัญหาระยะยาว เช่น memory footprint ของ backend process ค่อยๆ โตขึ้นจาก catalog cache ที่สะสม หรือ memory fragmentation
+2. ถ้ามีการเปลี่ยนแปลง schema หรือ configuration บางอย่างที่ต้องการให้ connection ใหม่รับรู้ (เช่นเปลี่ยน `search_path` default, หรือ deploy ALTER ROLE ใหม่) connection เก่าที่ค้างอยู่นานจะไม่เห็นการเปลี่ยนแปลงจนกว่าจะถูกปิดเอง
+3. Connection ที่ idle ค้างไว้นานๆ ยังคงกิน slot ใน `max_connections` ของ PostgreSQL อยู่ ทำให้พื้นที่สำหรับ connection ใหม่ที่ต้องการใช้งานจริงลดลง
+
+การตั้ง `server_lifetime = 3600` (1 ชั่วโมง) และ `server_idle_timeout = 600` (10 นาที) ช่วยให้ pool มีการหมุนเวียน (recycle) connection อย่างสม่ำเสมอ ลดความเสี่ยงเรื่อง resource leak สะสมในระยะยาว
+
+</details>
+
+<details>
+<summary><b>แบบฝึกหัดที่ 7</b>: เปรียบเทียบว่า PgBouncer และ Pgpool-II ตัวไหนเหมาะกับสถานการณ์ต่อไปนี้มากกว่า พร้อมเหตุผล: "ทีม DevOps มีขนาดเล็ก ต้องการเครื่องมือที่ดูแลรักษาง่าย ระบบมี PostgreSQL เดียวไม่มี replica และต้องการแค่ลดปัญหา 'too many connections' ที่เกิดขึ้นบ่อยช่วง peak hour"</summary>
+
+**เฉลย**:
+
+**PgBouncer** เหมาะกว่าอย่างชัดเจนในสถานการณ์นี้ เพราะ:
+
+1. ระบบมี PostgreSQL เดียว ไม่มี replica จึงไม่จำเป็นต้องใช้ความสามารถด้าน query routing/load balancing ของ Pgpool-II เลย
+2. ปัญหาที่ต้องการแก้คือ connection pooling ล้วนๆ ("too many connections") ซึ่งเป็นจุดแข็งหลักของ PgBouncer โดยตรง
+3. ทีมมีขนาดเล็ก การเลือกเครื่องมือที่ config file เดียว เข้าใจง่าย debug ง่าย (PgBouncer) จะลด operational burden เทียบกับ Pgpool-II ที่มี concept ซับซ้อนกว่า (backend node, watchdog, failover script ฯลฯ) ซึ่งจะเป็นภาระเกินความจำเป็นถ้าไม่ได้ใช้ฟีเจอร์เหล่านั้นจริง
+4. PgBouncer มี overhead ต่ำกว่า เหมาะกับการติดตั้งแบบรวดเร็วและดูแลรักษาระยะยาวด้วยทีมเล็ก
+
+</details>
+
+<details>
+<summary><b>แบบฝึกหัดที่ 8</b>: จากผลลัพธ์ `SHOW POOLS` ต่อไปนี้ ให้วิเคราะห์ว่ามีปัญหาอะไรเกิดขึ้น และควรแก้ไขอย่างไร
+
+```
+     database      |    user     | cl_active | cl_waiting | sv_active | sv_idle | maxwait | pool_mode
+--------------------+-------------+-----------+------------+-----------+---------+---------+-------------
+ ecommerce_db       | app_user    |       198 |         87 |        25 |       0 |      12 | transaction
+```
+</summary>
+
+**เฉลย**:
+
+การวิเคราะห์:
+- `cl_waiting = 87` สูงมาก แปลว่ามี client connection ถึง 87 ตัวที่กำลังรอคิวเพื่อขอ server connection
+- `sv_idle = 0` แปลว่าไม่มี server connection ว่างเหลือเลยในpool — pool ทำงานเต็มกำลัง (saturated)
+- `sv_active = 25` เท่ากับ `pool_size` ที่ตั้งไว้ (สันนิษฐานว่า `pool_size = 25`) ซึ่งทั้งหมดถูกใช้งานอยู่
+- `maxwait = 12` วินาที — client บางตัวต้องรอนานถึง 12 วินาทีถึงจะได้ query ทำงาน ซึ่งกระทบ user experience อย่างชัดเจน (ถือว่าแย่มากสำหรับ web request ทั่วไปที่ควรตอบสนองในหลัก ms)
+
+นี่คือสัญญาณของ **pool saturation** ชัดเจน สาเหตุที่เป็นไปได้และวิธีแก้:
+
+1. **pool_size เล็กเกินไปเทียบกับ traffic จริง** → ควรพิจารณาเพิ่ม `pool_size`/`default_pool_size` (แต่ต้องเช็คก่อนว่า PostgreSQL server เองมี CPU/memory เพียงพอรองรับ connection ที่เพิ่มขึ้นจริงหรือไม่)
+2. **มี query ที่ทำงานช้าผิดปกติ (slow query) ที่ถือ server connection ไว้นานเกินควร** → ตรวจสอบผ่าน `SHOW SERVERS` หรือ log ของ PostgreSQL (`pg_stat_activity`) ว่ามี query ไหนที่ค้างนานผิดปกติ อาจต้อง optimize query หรือเพิ่ม index
+3. **มี transaction ที่ idle-in-transaction ค้างอยู่** (แอปเปิด transaction แล้วลืม commit) → ตรวจสอบและตั้ง `idle_transaction_timeout` ให้เหมาะสมเพื่อตัดการเชื่อมต่อเหล่านี้อัตโนมัติ
+4. ถ้า traffic โดยรวมสูงเกินกำลังของ PostgreSQL server จริงๆ (ไม่ใช่แค่ config ผิด) อาจต้องพิจารณา scale PostgreSQL เอง (เพิ่ม CPU/RAM) หรือกระจายโหลดไปยัง read replica ผ่าน Pgpool-II หรือ application-level routing
+
+</details>
+
+<details>
+<summary><b>แบบฝึกหัดที่ 9</b>: เขียนคำสั่ง SQL ที่ใช้ดึง password hash จาก PostgreSQL เพื่อนำไปสร้างไฟล์ `userlist.txt` ของ PgBouncer แบบไม่เปิดเผย plaintext password และอธิบายว่าทำไมวิธีนี้ปลอดภัยกว่าการตั้ง plaintext password เอง</summary>
+
+**เฉลย**:
+
+```sql
+SELECT usename, passwd FROM pg_shadow WHERE usename IN ('app_user', 'worker_user', 'report_user');
+```
+
+นำผลลัพธ์คอลัมน์ `passwd` (ซึ่งเป็นค่า SCRAM verifier รูปแบบ `SCRAM-SHA-256$...`) ไปวางในไฟล์ `userlist.txt` โดยตรงในรูปแบบ:
+
+```
+"app_user" "SCRAM-SHA-256$4096:...==:..."
+```
+
+เหตุผลที่ปลอดภัยกว่า:
+1. PostgreSQL เก็บ password ในรูปแบบ hashed (SCRAM verifier) อยู่แล้ว ไม่เคยเก็บ plaintext — การดึงค่า `passwd` มาใช้จึงไม่ทำให้ plaintext password รั่วไหลไปที่ไหนเลย ไม่ต้องมีใครรู้ plaintext password จริงของ user นั้นๆ
+2. ถ้าสร้าง `userlist.txt` โดยกำหนด plaintext password เองแล้วให้ PgBouncer hash ใหม่ จะต้องมีขั้นตอนที่ plaintext password ถูกพิมพ์/ส่งผ่านที่ไหนสักแห่ง (เช่นในสคริปต์, ในการสื่อสาร) เพิ่มความเสี่ยงเรื่อง credential leak
+3. ค่า SCRAM verifier ที่คัดลอกมาต้อง**ตรงกัน**กับที่ PostgreSQL ใช้จริงเสมอ (เพราะเป็นค่าเดียวกัน) ทำให้ไม่มีปัญหาเรื่อง sync password ผิดพลาดระหว่างสองระบบ
+
+</details>
+
+<details>
+<summary><b>แบบฝึกหัดที่ 10</b>: ระบบอีคอมเมิร์ซของเรากำลังจะมี flash sale ใหญ่ในอีก 1 สัปดาห์ คาดว่า traffic จะพุ่งขึ้น 10 เท่าจากปกติในช่วง 30 นาทีแรก ให้ระบุมาตรการที่เกี่ยวกับ connection pooling อย่างน้อย 5 ข้อที่ควรเตรียมล่วงหน้า</summary>
+
+**เฉลย** (ตัวอย่างมาตรการที่เหมาะสม อาจมีคำตอบอื่นที่สมเหตุสมผลได้เช่นกัน):
+
+1. **ทดสอบ load test ล่วงหน้า** จำลอง traffic 10 เท่าผ่าน PgBouncer เพื่อดูว่า `pool_size` ปัจจุบันเพียงพอหรือไม่ และปรับค่าตามผลทดสอบจริงก่อนวันงานจริง
+2. **ตั้งค่า `reserve_pool_size` และ `reserve_pool_timeout`** ให้เหมาะสมเพื่อรองรับ burst traffic ช่วงสั้นๆ โดยไม่ต้อง provision pool_size ใหญ่ตลอดเวลา (สิ้นเปลืองทรัพยากรนอกช่วง sale)
+3. **ตรวจสอบและตั้งค่า `idle_transaction_timeout` ให้รัดกุม** เพื่อป้องกันไม่ให้ transaction ที่ค้าง (จาก bug หรือ network issue) ไปยึด connection ในpool ที่มีค่ามากในช่วงวิกฤต
+4. **เตรียม monitoring/alerting แบบ real-time** ผ่าน `pgbouncer_exporter` + Grafana dashboard จับตา `cl_waiting`, `avg_wait_time`, `sv_idle` เพื่อรู้ทันทีถ้า pool เริ่ม saturate ระหว่าง sale
+5. **พิจารณาแยก pool สำหรับ critical path** (เช่น checkout/payment) ออกจาก pool ของ traffic ทั่วไป (เช่น browsing/search) โดยตั้งเป็นคนละ database entry ใน `[databases]` เพื่อไม่ให้ traffic การเรียกดูสินค้าจำนวนมากไปแย่ง connection จาก flow การชำระเงินที่สำคัญกว่า
+6. **ตรวจสอบว่า PostgreSQL server เองมี `max_connections` เพียงพอ** รองรับผลรวมของทุก pool ที่ PgBouncer จะเปิดไปจริง (รวม reserve pool ด้วย) และมี headroom สำหรับ superuser/monitoring connection
+7. **เตรียมแผน rollback/scale-out** เช่น เตรียม read replica เพิ่มเติมสำหรับ query ที่เป็น read-only (product listing, search) เพื่อลดโหลดที่ primary ต้องรับโดยตรง
+8. **แจ้งทีมและเตรียม runbook** สำหรับขั้นตอนที่ต้องทำถ้า pool saturate จริงระหว่าง sale (เช่นคำสั่ง `PAUSE`/`RESUME`, การเพิ่ม pool_size แบบ dynamic ผ่าน `RELOAD` โดยไม่ downtime)
+
+</details>
+
+---
+
+**บทถัดไป**: [Part 067 — Load Balancing](./part-067-load-balancing.md)
