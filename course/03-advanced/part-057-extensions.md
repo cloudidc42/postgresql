@@ -230,28 +230,21 @@ extension บางตัว เช่น `pgcrypto`, `pg_trgm`, `uuid-ossp` ถ
 SELECT name, default_version, comment
 FROM pg_available_extensions
 ORDER BY name
-LIMIT 15;
+LIMIT 8;
 ```
 
 ```
        name        | default_version |                        comment
 --------------------+------------------+---------------------------------------------------------
  adminpack          | 2.1              | administrative functions for PostgreSQL
- amcheck            | 1.4              | functions for verifying relation integrity
- autoinc            | 1.0              | functions for autoincrementing fields
- bloom              | 1.0              | bloom access method - signature file based index
  btree_gin          | 1.3              | btree_gin support for common types
  btree_gist         | 1.7              | btree_gist support for common types
- citext             | 1.6              | data type for citext
- cube               | 1.5              | data type for multidimensional cubes
- dict_int           | 1.4              | dict_int - text search dictionary template for integers
- earthdistance      | 1.1              | contrib module for earth distance calculations
- fuzzystrmatch      | 1.2              | determine string similarity based on Levenshtein distance
  hstore             | 1.8              | key-value store for PostgreSQL
+ pg_repack          | 1.5              | reorganize tables without exclusive locks
  pg_stat_statements | 1.11             | track planning and execution statistics of all SQL...
  pg_trgm            | 1.6              | text similarity measurement and index searching...
  pgcrypto           | 1.3              | cryptographic functions
-(15 rows)
+(8 rows)
 ```
 
 ค่านี้ขึ้นกับว่า server ติดตั้ง contrib package ครบหรือไม่ ถ้าค้นหาแล้วไม่เจอ extension ที่ต้องการ แปลว่าต้องติดตั้ง package เพิ่มระดับ OS (เช่น `apt install postgresql-contrib` หรือใน managed service ต้องเปิดผ่านหน้า console)
@@ -529,21 +522,15 @@ SELECT verify_customer_login('suda.b@example.com', 'incorrect');
 ### cost factor สูงแค่ไหนถึงจะพอ
 
 ```sql
--- ทดสอบเวลาที่ใช้ในการ hash ที่ cost factor ต่าง ๆ
 \timing on
 SELECT crypt('test', gen_salt('bf', 12));
 ```
 
 ```
-                            crypt
---------------------------------------------------------------
- $2a$12$xxxxxxxxxxxxxxxxxxxxxOeYoBz1kIz3s5rQ9uVw2xJc4Nn7Tp8Ka
-(1 row)
-
-Time: 312.845 ms
+ Time: 312.845 ms
 ```
 
-cost factor 12 ใช้เวลาประมาณ 300 มิลลิวินาทีต่อการ hash หนึ่งครั้ง ซึ่งเหมาะสำหรับ authentication endpoint ที่ไม่ต้องรับ traffic สูงมาก แต่ถ้าระบบมีผู้ใช้ login พร้อมกันจำนวนมาก อาจพิจารณาลดเหลือ cost 10-11 หรือย้าย logic การ hash ไปทำที่ชั้น application (เช่น bcrypt library ใน backend) แทนที่จะให้ database รับภาระ CPU ทั้งหมด — เป็นการตัดสินใจ trade-off ระหว่างความปลอดภัยกับ throughput ที่ทีม backend ต้องช่วยกันพิจารณา
+cost factor 12 ใช้เวลาประมาณ 300 มิลลิวินาทีต่อการ hash หนึ่งครั้ง เหมาะสำหรับ authentication endpoint ทั่วไป แต่ถ้าระบบมีผู้ใช้ login พร้อมกันจำนวนมาก อาจพิจารณาลดเหลือ cost 10-11 หรือย้าย logic การ hash ไปทำที่ชั้น application แทนที่จะให้ database รับภาระ CPU ทั้งหมด — เป็นการตัดสินใจ trade-off ระหว่างความปลอดภัยกับ throughput ที่ทีม backend ต้องช่วยกันพิจารณา
 
 ---
 
@@ -703,7 +690,7 @@ SELECT gen_random_uuid();
 SELECT customer_id, customer_uuid, email
 FROM customers
 ORDER BY customer_id
-LIMIT 5;
+LIMIT 3;
 ```
 
 ```
@@ -712,9 +699,7 @@ LIMIT 5;
            1 | 3d9f4a1e-7b2c-4e6d-9a1f-8c3b5d7e9f01     | somchai.j@example.com
            2 | 9a2c1f0e-4b8d-4a3c-b7e1-5d6f8a0c2e4b     | suda.b@example.com
            3 | 5e7f2a9c-1d3b-4c6e-8a0f-2b4d6e8f0a1c     | anan.w@example.com
-           4 | 8b1d3f5a-6c0e-4d2b-9a4c-7e1f3a5b7c9d     | malee.s@example.com
-           5 | 2c4e6a8b-0d1f-4b3c-5a7e-9c1d3f5a7b9c     | piti.c@example.com
-(5 rows)
+(3 rows)
 ```
 
 ทุกแถวมีค่า UUID แล้วโดยอัตโนมัติเพราะเราตั้ง `DEFAULT gen_random_uuid()` ไว้ตอนสร้างตาราง โดยที่ไม่ต้องระบุค่าตอน `INSERT`
