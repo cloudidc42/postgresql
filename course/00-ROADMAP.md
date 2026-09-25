@@ -128,14 +128,14 @@
 | 086 | 851–860 | Query Planner Internals: Cost-based Optimization | ✅ |
 | 087 | 861–870 | เชื่อมต่อ PostgreSQL กับ Node.js (node-postgres, Prisma) | ✅ |
 | 088 | 871–880 | เชื่อมต่อ PostgreSQL กับ Python (psycopg, SQLAlchemy, Django ORM) | ✅ |
-| 089 | 881–890 | เชื่อมต่อ PostgreSQL กับ Go (pgx, GORM) | ⬜ |
-| 090 | 891–900 | เชื่อมต่อ PostgreSQL กับ Java (JDBC, Hibernate/JPA) | ⬜ |
-| 091 | 901–910 | Database Design Patterns สำหรับสถาปัตยกรรม Microservices | ⬜ |
-| 092 | 911–920 | Event Sourcing และ CQRS กับ PostgreSQL | ⬜ |
-| 093 | 921–930 | PostgreSQL บน Docker และ Kubernetes (Operators: Zalando, CloudNativePG) | ⬜ |
-| 094 | 931–940 | PostgreSQL บน Cloud: AWS RDS และ Aurora PostgreSQL | ⬜ |
-| 095 | 941–950 | PostgreSQL บน Cloud: GCP Cloud SQL และ AlloyDB | ⬜ |
-| 096 | 951–955 | PostgreSQL บน Cloud: Azure Database for PostgreSQL | ⬜ |
+| 089 | 881–890 | เชื่อมต่อ PostgreSQL กับ Go (pgx, GORM) | ✅ |
+| 090 | 891–900 | เชื่อมต่อ PostgreSQL กับ Java (JDBC, Hibernate/JPA) | ✅ |
+| 091 | 901–910 | Database Design Patterns สำหรับสถาปัตยกรรม Microservices | ✅ |
+| 092 | 911–920 | Event Sourcing และ CQRS กับ PostgreSQL | ✅ |
+| 093 | 921–930 | PostgreSQL บน Docker และ Kubernetes (Operators: Zalando, CloudNativePG) | ✅ |
+| 094 | 931–940 | PostgreSQL บน Cloud: AWS RDS และ Aurora PostgreSQL | ✅ |
+| 095 | 941–950 | PostgreSQL บน Cloud: GCP Cloud SQL และ AlloyDB | ✅ |
+| 096 | 951–955 | PostgreSQL บน Cloud: Azure Database for PostgreSQL | ✅ |
 | 097 | 956–965 | Distributed PostgreSQL: Citus และ Sharding Strategy | ⬜ |
 | 098 | 966–975 | Benchmarking ด้วย pgbench และ Load Testing | ⬜ |
 | 099 | 976–985 | Disaster Recovery และ Business Continuity Planning | ⬜ |
