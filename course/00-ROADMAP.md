@@ -20,18 +20,18 @@
 | 006 | 51–60 | Data Types พื้นฐาน: ตัวเลข, ข้อความ, boolean | ✅ |
 | 007 | 61–70 | Data Types วันที่และเวลา (date, time, timestamp, interval) | ✅ |
 | 008 | 71–80 | การสร้างตาราง CREATE TABLE และการออกแบบคอลัมน์ | ✅ |
-| 009 | 81–90 | INSERT: เพิ่มข้อมูลเดี่ยว, หลายแถว, INSERT...SELECT | ⬜ |
-| 010 | 91–100 | SELECT พื้นฐาน: เลือกคอลัมน์, alias, DISTINCT | ⬜ |
-| 011 | 101–110 | WHERE clause และ Operators (comparison, logical, LIKE, IN, BETWEEN) | ⬜ |
-| 012 | 111–120 | ORDER BY, LIMIT, OFFSET, FETCH | ⬜ |
-| 013 | 121–130 | UPDATE: แก้ไขข้อมูลแบบมีเงื่อนไขและหลายคอลัมน์ | ⬜ |
-| 014 | 131–140 | DELETE และความแตกต่างจาก TRUNCATE | ⬜ |
-| 015 | 141–150 | NULL คืออะไร และการจัดการ NULL อย่างถูกต้อง | ⬜ |
-| 016 | 151–160 | Primary Key และ Unique Constraint | ⬜ |
-| 017 | 161–170 | Foreign Key และ Referential Integrity, ON DELETE/UPDATE | ⬜ |
-| 018 | 171–180 | Check Constraint, Default Value, Not Null | ⬜ |
-| 019 | 181–190 | ALTER TABLE: เพิ่ม/ลบ/แก้ไขคอลัมน์และ constraint | ⬜ |
-| 020 | 191–200 | โปรเจกต์รวมระดับพื้นฐาน: ระบบจัดการห้องสมุด (Library Management) | ⬜ |
+| 009 | 81–90 | INSERT: เพิ่มข้อมูลเดี่ยว, หลายแถว, INSERT...SELECT | ✅ |
+| 010 | 91–100 | SELECT พื้นฐาน: เลือกคอลัมน์, alias, DISTINCT | ✅ |
+| 011 | 101–110 | WHERE clause และ Operators (comparison, logical, LIKE, IN, BETWEEN) | ✅ |
+| 012 | 111–120 | ORDER BY, LIMIT, OFFSET, FETCH | ✅ |
+| 013 | 121–130 | UPDATE: แก้ไขข้อมูลแบบมีเงื่อนไขและหลายคอลัมน์ | ✅ |
+| 014 | 131–140 | DELETE และความแตกต่างจาก TRUNCATE | ✅ |
+| 015 | 141–150 | NULL คืออะไร และการจัดการ NULL อย่างถูกต้อง | ✅ |
+| 016 | 151–160 | Primary Key และ Unique Constraint | ✅ |
+| 017 | 161–170 | Foreign Key และ Referential Integrity, ON DELETE/UPDATE | ✅ |
+| 018 | 171–180 | Check Constraint, Default Value, Not Null | ✅ |
+| 019 | 181–190 | ALTER TABLE: เพิ่ม/ลบ/แก้ไขคอลัมน์และ constraint | ✅ |
+| 020 | 191–200 | โปรเจกต์รวมระดับพื้นฐาน: ระบบจัดการห้องสมุด (Library Management) | ✅ |
 
 ## 🔵 ระดับ 2: ระดับกลาง (Intermediate) — Step 201–400
 
