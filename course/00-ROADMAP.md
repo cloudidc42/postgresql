@@ -12,10 +12,10 @@
 
 | Part | Steps | หัวข้อ | สถานะ |
 |---|---|---|---|
-| 001 | 1–10 | Database คืออะไร, RDBMS, ทำไมต้อง PostgreSQL, ประวัติและสถาปัตยกรรมโดยรวม | ✅ |
-| 002 | 11–20 | การติดตั้ง PostgreSQL บน Windows/macOS/Linux และผ่าน Docker | ✅ |
-| 003 | 21–30 | เครื่องมือทำงาน: psql, pgAdmin, DBeaver, VS Code extensions | ✅ |
-| 004 | 31–40 | โครงสร้างฐานข้อมูล: Cluster, Database, Schema, Table, Catalog | ✅ |
+| 001 | 1–10 | Database คืออะไร, RDBMS, ทำไมต้อง PostgreSQL, ประวัติและสถาปัตยกรรมโดยรวม | ⬜ |
+| 002 | 11–20 | การติดตั้ง PostgreSQL บน Windows/macOS/Linux และผ่าน Docker | ⬜ |
+| 003 | 21–30 | เครื่องมือทำงาน: psql, pgAdmin, DBeaver, VS Code extensions | ⬜ |
+| 004 | 31–40 | โครงสร้างฐานข้อมูล: Cluster, Database, Schema, Table, Catalog | ⬜ |
 | 005 | 41–50 | การสร้างและจัดการฐานข้อมูล (CREATE/ALTER/DROP DATABASE) | ⬜ |
 | 006 | 51–60 | Data Types พื้นฐาน: ตัวเลข, ข้อความ, boolean | ⬜ |
 | 007 | 61–70 | Data Types วันที่และเวลา (date, time, timestamp, interval) | ⬜ |
