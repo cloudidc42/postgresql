@@ -708,46 +708,28 @@ LIMIT 6;
 | `#>` | เข้าถึงค่าตาม path ที่ระบุ (array ของ key/index ทีละชั้น) | `json`/`jsonb` |
 | `#>>` | เข้าถึงค่าตาม path ที่ระบุ | `text` |
 
-### 1. ตัวอย่างพื้นฐาน
-
-เปรียบเทียบระหว่างการเขียนแบบ `->` ต่อเนื่อง กับ `#>` แบบ path เดียว:
+### 1. ตัวอย่างพื้นฐาน — เปรียบเทียบกับ `->` ต่อเนื่อง
 
 ```sql
 SELECT
     product_name,
-    attributes -> 'specs' -> 'battery'              AS via_arrow,   -- แบบเดิม
-    attributes #> '{specs,battery}'                  AS via_hash    -- แบบ path
+    attributes -> 'specs' -> 'battery'   AS via_arrow,   -- แบบเดิม (ได้ jsonb)
+    attributes #> '{specs,battery}'      AS via_hash,    -- แบบ path (ได้ jsonb)
+    attributes #>> '{specs,battery}'     AS via_hash_txt -- แบบ path คืน text
 FROM products
 WHERE product_id = 1;
 ```
 
 ```
-     product_name     | via_arrow    | via_hash
------------------------+--------------+-----------
- iPhone 15 Pro Max     | "4441mAh"    | "4441mAh"
+     product_name     | via_arrow    | via_hash   | via_hash_txt
+-----------------------+--------------+------------+---------------
+ iPhone 15 Pro Max     | "4441mAh"    | "4441mAh"  | 4441mAh
 (1 row)
 ```
 
-ผลลัพธ์เหมือนกันทุกประการ แต่ syntax ของ `#>` เขียน path เป็น `'{key1,key2,key3}'` (text array literal ของ PostgreSQL) ในครั้งเดียว อ่านง่ายกว่าเมื่อ path ลึกหลายชั้น
+ผลลัพธ์ของ `via_arrow` และ `via_hash` เหมือนกันทุกประการ แต่ syntax ของ `#>` เขียน path เป็น `'{key1,key2,key3}'` (text array literal ของ PostgreSQL) ในครั้งเดียว อ่านง่ายกว่าเมื่อ path ลึกหลายชั้น ส่วน `#>>` (แบบเดียวกับ `->>`) คืนผลเป็น `text` ตรงๆ โดยไม่มี quote ครอบ ซึ่งเป็นรูปแบบที่ใช้บ่อยที่สุดในทางปฏิบัติ
 
-### 2. `#>>` คืนค่าเป็น text (ใช้บ่อยที่สุด)
-
-```sql
-SELECT
-    product_name,
-    attributes #>> '{specs,battery}' AS battery_text
-FROM products
-WHERE product_id = 1;
-```
-
-```
-     product_name     | battery_text
------------------------+---------------
- iPhone 15 Pro Max     | 4441mAh
-(1 row)
-```
-
-### 3. เจาะลึกหลายชั้นพร้อม array index ผสมกัน
+### 2. เจาะลึกหลายชั้นพร้อม array index ผสมกัน
 
 path array สามารถผสม key (สำหรับ object) และ index แบบตัวเลข (สำหรับ array) ไว้ด้วยกันได้:
 
@@ -767,7 +749,7 @@ WHERE product_id = 1;
 (1 row)
 ```
 
-### 4. Path ที่ไม่มีอยู่จริง — คืน NULL อย่างปลอดภัย
+### 3. Path ที่ไม่มีอยู่จริง — คืน NULL อย่างปลอดภัย
 
 ข้อดีสำคัญของ `#>` / `#>>` (และ `->` / `->>` ด้วย) คือ **ไม่เกิด error เมื่อ path ไม่มีอยู่จริง** แต่คืน `NULL` แทน ซึ่งปลอดภัยกว่าการเขียน error handling เอง:
 
@@ -788,13 +770,12 @@ WHERE product_id = 6;  -- เสื้อยืด ไม่มี specs เล�
 
 พฤติกรรมนี้สำคัญมากเวลาทำงานกับตารางที่แต่ละแถวมีโครงสร้าง JSONB ต่างกัน (เหมือนตาราง `products` ของเรา) เพราะเราไม่ต้องเขียน `CASE WHEN` เช็คว่า key มีอยู่จริงก่อนทุกครั้ง
 
-### 5. ตัวอย่างเปรียบเทียบทุก path ของ `orders.metadata`
+### 4. ตัวอย่างใช้งานจริง — `orders.metadata` และการ cast ชนิดข้อมูล
+
+เจาะ path ลึกของ `orders.metadata` (`utm.source`, `utm.campaign`) และใช้ `#>>` ร่วมกับ `(attributes #>> '{weight_kg}')::numeric` เพื่อเปรียบเทียบเชิงตัวเลข (เพราะผลลัพธ์ของ `#>>` เป็น `text` เสมอ จึงต้อง cast กลับให้ตรงชนิดทุกครั้งก่อนนำไปคำนวณหรือเปรียบเทียบ):
 
 ```sql
-SELECT
-    order_id,
-    metadata #>> '{utm,source}'   AS utm_source,
-    metadata #>> '{utm,campaign}' AS utm_campaign
+SELECT order_id, metadata #>> '{utm,source}' AS utm_source, metadata #>> '{utm,campaign}' AS utm_campaign
 FROM orders
 WHERE metadata ? 'utm'
 ORDER BY order_id;
@@ -808,11 +789,9 @@ ORDER BY order_id;
 (2 rows)
 ```
 
-> **หมายเหตุ**: operator `?` ในตัวอย่างข้างต้น (เช็คว่ามี key อยู่ไหม) เป็นหนึ่งใน containment operator ของ JSONB ที่จะอธิบายละเอียดใน [Part 052](./part-052-jsonb-advanced.md) — ในที่นี้ใช้เพื่อกรองเฉพาะคำสั่งซื้อที่มาจากแคมเปญอีเมลเท่านั้น
+> **หมายเหตุ**: operator `?` ในตัวอย่างข้างต้น (เช็คว่ามี key อยู่ไหม) เป็นหนึ่งใน containment operator ของ JSONB ที่จะอธิบายละเอียดใน [Part 052](./part-052-jsonb-advanced.md)
 
-### 6. ใช้ `#>>` ร่วมกับการ cast ชนิดข้อมูล
-
-เพราะผลลัพธ์ของ `#>>` เป็น `text` เสมอ เมื่อต้องการนำไปคำนวณเชิงตัวเลขหรือเปรียบเทียบ ต้อง cast ให้ตรงชนิดเสมอ:
+อีกตัวอย่างหนึ่งของการ cast กลับเป็น `numeric` เพื่อกรองและเรียงลำดับเชิงตัวเลข:
 
 ```sql
 SELECT
