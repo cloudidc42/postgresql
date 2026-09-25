@@ -613,6 +613,20 @@ RLS คือการฝัง policy ไว้ในระดับ PostgreSQL
 
 เมื่อมองทั้ง 4 case study พร้อมกัน จะเห็นว่าแม้โจทย์ทางธุรกิจจะต่างกันโดยสิ้นเชิง (feed, การเงิน, e-commerce, SaaS) แต่มี **pattern ทางสถาปัตยกรรมร่วม** ที่ปรากฏซ้ำเสมอ นี่คือสิ่งที่แยก "วิศวกรที่ท่องจำเทคนิค" ออกจาก "สถาปนิกระบบที่แท้จริง"
 
+### 990.0 ตารางเปรียบเทียบทั้ง 4 Case Study ในมุมเดียวกัน
+
+ก่อนสรุป pattern ร่วม ลองเปรียบเทียบ 4 ระบบผ่านมิติเดียวกันเพื่อเห็นความแตกต่างและความเหมือนอย่างชัดเจน:
+
+| มิติ | FeedFlow (Social) | PayCore (Fintech) | ShopScale (E-commerce) | TenantHub (SaaS) |
+|---|---|---|---|---|
+| ตัวชี้วัดสำคัญที่สุด | Latency / Freshness | Correctness / RPO=0 | Throughput ช่วง spike | Isolation / ต้นทุนต่อ tenant |
+| Consistency model หลัก | Eventual consistency (ส่วนใหญ่) | Strong consistency (ทุกที่) | Strong เฉพาะ write path, eventual สำหรับ read | ขึ้นกับ tier ของ tenant |
+| กลไกป้องกันหลัก | Cache + replica + rate limit | Locking + sync replication + audit | Atomic UPDATE + pre-check + traffic shaping | RLS + routing layer |
+| จุดคอขวดหลัก | Read throughput | Write correctness ภายใต้ failure | Lock contention บน hot row | Noisy neighbor ระหว่าง tenant |
+| สิ่งที่ยอมสละเพื่อ scale | ความสด (freshness) เล็กน้อย | Latency (ยอมช้าลง) | UX บางส่วน (ต้องรอคิว) | Customization ต่อ tenant (สำหรับ tier ต่ำ) |
+
+ตารางนี้แสดงให้เห็นชัดเจนว่า **ไม่มีระบบใดที่ "ดีที่สุดในทุกมิติ" ได้พร้อมกัน** — ทุกสถาปัตยกรรมคือการเลือกว่าจะยอมสละอะไรเพื่อให้ได้สิ่งที่สำคัญที่สุดสำหรับธุรกิจนั้น ๆ มา ซึ่งเป็นแก่นของทฤษฎี **CAP theorem** และหลักการ trade-off ที่เรียนมาตลอดหลักสูตร
+
 ### 990.1 Defense in Depth (การป้องกันหลายชั้น)
 
 ไม่มีระบบไหนพึ่งกลไกป้องกันเพียงชั้นเดียว:
@@ -658,6 +672,16 @@ RLS คือการฝัง policy ไว้ในระดับ PostgreSQL
 ### 990.6 Data Locality และการเลือก Partition/Shard Key อย่างมีเหตุผล
 
 ทั้ง sharding by `user_id` (FeedFlow), stock sharding (ShopScale), และ tenant routing (TenantHub) ล้วนสะท้อนหลักการเดียวกัน: **เลือก key ที่ทำให้ query ส่วนใหญ่เป็น "local" ต่อ shard/partition เดียว** เพื่อหลีกเลี่ยง cross-shard join หรือ cross-shard transaction ที่มีต้นทุนสูงมากและซับซ้อนในการรับประกัน consistency
+
+### 990.7 ต้นทุน (Cost) เป็น Constraint ทางสถาปัตยกรรมเสมอ ไม่ใช่แค่ปัจจัยรอง
+
+บทเรียนสุดท้ายที่มักถูกมองข้ามในห้องเรียนแต่เป็นความจริงข้อแรกในที่ทำงานจริงคือ **ทุกการตัดสินใจทางสถาปัตยกรรมมีป้ายราคากำกับอยู่เสมอ**:
+
+- FeedFlow เลือก async replication ไม่ใช่แค่เพราะ "เร็วกว่า" แต่เพราะ synchronous replication ในระดับ traffic ของมันจะหมายถึงต้นทุน infrastructure ที่สูงขึ้นมหาศาลโดยไม่คุ้มกับความเสี่ยงทางธุรกิจที่ลดลง
+- PayCore ยอมจ่ายต้นทุนที่สูงกว่า (synchronous replication, quorum commit, dedicated compliance tooling) เพราะความเสี่ยงของการสูญเสียเงินแม้เพียงครั้งเดียวมีมูลค่าสูงกว่าต้นทุน infrastructure ที่เพิ่มขึ้นมากในเชิงเปรียบเทียบ
+- TenantHub เลือก RLS เป็นค่าเริ่มต้นสำหรับ tenant ส่วนใหญ่ เพราะ database-per-tenant สำหรับลูกค้าทุกรายจะทำให้ต้นทุนต่อลูกค้ารายเล็กสูงกว่ารายได้ที่ลูกค้ารายนั้นจ่าย (unit economics ไม่คุ้มค่า) และสงวนต้นทุนที่สูงกว่าไว้เฉพาะ tenant ที่จ่ายเงินคุ้มค่าจริง ๆ
+
+ข้อสรุปคือ วิศวกรระดับ world-class ไม่ได้ถามแค่ "เทคนิคนี้ทำให้ระบบดีขึ้นไหม" แต่ถามว่า **"ความดีขึ้นนั้นคุ้มกับต้นทุน (เงิน, เวลาพัฒนา, operational complexity) ที่ต้องจ่ายหรือไม่ เมื่อเทียบกับความเสี่ยงทางธุรกิจที่กำลังป้องกันอยู่"** — นี่คือเหตุผลที่ไม่มีคำตอบสำเร็จรูปในงานสถาปัตยกรรมระบบ มีแต่การวิเคราะห์ trade-off ที่เหมาะสมกับบริบทเฉพาะของแต่ละองค์กรเท่านั้น
 
 ---
 
