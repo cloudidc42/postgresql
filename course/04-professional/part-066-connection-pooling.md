@@ -876,6 +876,124 @@ services:
 
 ---
 
+## Step 660: แบบฝึกหัดรวม — ออกแบบ Connection Pooling Layer สำหรับระบบอีคอมเมิร์ซที่มี traffic สูง
+
+### โจทย์
+
+บริษัทอีคอมเมิร์ซของเรากำลังขยายระบบ สถาปัตยกรรมปัจจุบันมีรายละเอียดดังนี้:
+
+- **Web/API tier**: 8 instances (autoscale ได้สูงสุด 20 instances ช่วง peak) แต่ละ instance เปิด application-level connection pool ขนาด 30-50 connections
+- **Background worker tier**: 4 instances สำหรับ order processing, inventory sync, email/SMS notification — บาง job ต้องใช้ `LISTEN/NOTIFY` สำหรับ event-driven processing และบาง job ใช้ advisory lock เพื่อป้องกันการประมวลผลซ้ำ
+- **Reporting/BI tier**: dashboard ภายในที่ query แบบ ad-hoc วันละไม่กี่ครั้ง แต่บาง query หนักมาก (aggregate ข้อมูล order/payment ย้อนหลังหลายเดือน)
+- **PostgreSQL infrastructure**: primary 1 เครื่อง (16 CPU core, 64GB RAM) + read replica 2 เครื่อง (8 CPU core, 32GB RAM ต่อเครื่อง)
+- **เป้าหมายทางธุรกิจ**: รองรับ flash sale ที่ traffic พุ่งขึ้น 10 เท่าใน 30 นาทีแรก โดยไม่กระทบ availability ของระบบ checkout/payment
+
+ให้ออกแบบ connection pooling layer ที่เหมาะสม ระบุ:
+1. จะใช้ PgBouncer, Pgpool-II หรือทั้งสองร่วมกัน และเพราะอะไร
+2. Pool mode ที่เหมาะสมสำหรับแต่ละ tier (web/API, worker, reporting)
+3. ตัวอย่าง config `pgbouncer.ini` (section `[databases]` และ `[pgbouncer]`) ที่ครอบคลุมทั้ง 3 tier
+4. แนวทาง monitoring ที่จะใช้ตรวจสอบสุขภาพของ pool
+
+### แนวทางการออกแบบ (Reference Solution)
+
+#### 1. เลือกเครื่องมือ
+
+เนื่องจาก:
+- Worker tier ต้องการ `LISTEN/NOTIFY` และ session-level advisory lock บางส่วน → ต้องการ pool ที่รองรับ `pool_mode = session`
+- Web/API tier เป็น short-lived transaction จำนวนมาก → ต้องการ `pool_mode = transaction` เพื่อ reuse connection สูงสุด
+- Reporting tier ควรแยกออกจาก write path ไปที่ read replica โดยตรง เพื่อไม่ให้ query หนักกระทบ primary
+- ยังไม่มีความจำเป็นต้องใช้ automatic transparent query routing แบบ Pgpool-II ในตอนนี้ เพราะทีม backend สามารถกำหนด connection string แยกสำหรับ read/write ได้เองอยู่แล้ว (routing แบบ explicit ที่แอป)
+
+**การตัดสินใจ**: ใช้ **PgBouncer เป็นหลัก** วางไว้หน้า primary (สำหรับ web/API + worker) และหน้า read replica แต่ละตัว (สำหรับ reporting) แยก pool ตาม tier ชัดเจน ยังไม่จำเป็นต้องใช้ Pgpool-II ในเฟสนี้ เพราะความซับซ้อนที่เพิ่มขึ้นไม่คุ้มกับประโยชน์ที่ได้ (ทีมยังจัดการ routing เองได้) — แต่เปิดทางไว้ให้พิจารณา Pgpool-II หรือ Patroni+HAProxy ในอนาคตถ้าจำนวน replica เพิ่มขึ้นมากและ routing เริ่มซับซ้อนเกินจะจัดการเองที่แอป
+
+#### 2. Pool mode ต่อ tier
+
+| Tier | pool_mode | เหตุผล |
+|---|---|---|
+| Web/API (`ecommerce_web`) | transaction | short-lived transaction จำนวนมาก ต้องการ reuse connection สูงสุด |
+| Worker (`ecommerce_worker`) | session | ต้องการ `LISTEN/NOTIFY` และ session-level advisory lock |
+| Reporting (`ecommerce_reports`) | transaction | query แบบ ad-hoc สั้นๆ ส่วนใหญ่ ไม่ต้องการ session state ข้าม query (query หนักที่ใช้เวลานานจะถือ connection ไว้นานอยู่แล้วตามธรรมชาติของ transaction pooling ซึ่งยอมรับได้เพราะ traffic tier นี้ต่ำ) |
+
+#### 3. ตัวอย่าง pgbouncer.ini ที่ครอบคลุมทั้ง 3 tier
+
+```ini
+;; /etc/pgbouncer/pgbouncer.ini — Production config สำหรับ ecommerce platform
+
+[databases]
+;; ---- Web/API tier: ชี้ไปที่ primary, transaction pooling ----
+ecommerce_web = host=db-primary.internal port=5432 dbname=ecommerce_db \
+                pool_mode=transaction pool_size=40 reserve_pool_size=10
+
+;; ---- Worker tier: ชี้ไปที่ primary, session pooling (รองรับ LISTEN/NOTIFY + advisory lock) ----
+ecommerce_worker = host=db-primary.internal port=5432 dbname=ecommerce_db \
+                    pool_mode=session pool_size=20
+
+;; ---- Reporting tier: ชี้ไปที่ read replica แยกจาก primary โดยสิ้นเชิง ----
+ecommerce_reports_r1 = host=db-replica1.internal port=5432 dbname=ecommerce_db \
+                        pool_mode=transaction pool_size=10
+
+ecommerce_reports_r2 = host=db-replica2.internal port=5432 dbname=ecommerce_db \
+                        pool_mode=transaction pool_size=10
+
+[pgbouncer]
+listen_addr = 0.0.0.0
+listen_port = 6432
+unix_socket_dir = /var/run/postgresql
+
+auth_type = scram-sha-256
+auth_file = /etc/pgbouncer/userlist.txt
+
+admin_users = pgbouncer_admin
+stats_users = pgbouncer_stats, monitoring_user
+
+;; รองรับ web tier ที่ autoscale ได้ถึง 20 instances × 50 connections = 1000
+max_client_conn = 1500
+default_pool_size = 20
+reserve_pool_size = 10
+reserve_pool_timeout = 3
+
+max_db_connections = 60          ;; กันไม่ให้ tier ไหน tier หนึ่งยึด connection ของ primary ทั้งหมด
+server_idle_timeout = 600
+server_lifetime = 3600
+query_wait_timeout = 30          ;; ตั้งให้ต่ำกว่า reporting เพราะ web/API ต้องการ latency ต่ำ
+idle_transaction_timeout = 60    ;; สำคัญมากสำหรับ worker tier ที่ใช้ session mode (ป้องกัน transaction ค้าง)
+
+logfile = /var/log/postgresql/pgbouncer.log
+pidfile = /var/run/postgresql/pgbouncer.pid
+log_connections = 1
+log_disconnections = 1
+log_stats = 1
+stats_period = 30
+
+client_tls_sslmode = prefer
+server_tls_sslmode = prefer
+```
+
+**หมายเหตุการออกแบบ**:
+- แยก `ecommerce_web` และ `ecommerce_worker` เป็นคนละ pool แม้จะชี้ไปที่ database เดียวกัน (primary) เพื่อไม่ให้ worker ที่ใช้ session mode (reuse connection ได้น้อยกว่า) ไปแย่ง connection budget จาก web tier ที่ต้องการ throughput สูงกว่า
+- `max_db_connections = 60` ควบคุมไม่ให้ผลรวมของทุก pool ที่ชี้ไปยัง primary เกินกว่าที่ primary รับไหว (40+20 = 60 พอดีตามที่ตั้งไว้ในตัวอย่างนี้ — ในทางปฏิบัติควรเผื่อ headroom เพิ่มสำหรับ superuser/replication)
+- Reporting tier แยก pool ต่อ replica แต่ละตัว เพื่อให้แอป dashboard เลือก connection string ได้เอง (manual load balancing แบบง่ายๆ โดยสลับ replica ตาม round-robin หรือ random ที่ฝั่งแอป)
+
+#### 4. แนวทาง monitoring
+
+- ติดตั้ง `pgbouncer_exporter` บนทุก PgBouncer instance (ทั้งที่หน้า primary และหน้า replica) ส่ง metrics เข้า Prometheus
+- Dashboard บน Grafana แยกตาม pool (`ecommerce_web`, `ecommerce_worker`, `ecommerce_reports_r1/r2`) แสดง `cl_waiting`, `avg_wait_time`, `sv_idle`, `sv_active` แบบ real-time
+- ตั้ง alert:
+  - `cl_waiting > 20` ใน `ecommerce_web` ต่อเนื่องเกิน 30 วินาที → แจ้งเตือนทันที (severity สูง เพราะกระทบ checkout)
+  - `sv_idle = 0` ใน `ecommerce_web` ต่อเนื่อง → เตือนล่วงหน้าก่อนถึงจุด saturation
+  - `avg_query_time` ใน `ecommerce_reports_*` เพิ่มขึ้นผิดปกติ → อาจมี query หนักที่ควร optimize
+- ก่อนวันจัด flash sale: รัน load test จำลอง 10 เท่าของ traffic ปกติผ่าน pool จริง เพื่อยืนยันว่าค่า `pool_size`/`max_client_conn` ที่ตั้งไว้รองรับได้จริงก่อนใช้งานจริง แล้วปรับ `reserve_pool_size` ตามผลทดสอบ
+
+### สรุปแนวคิดสำคัญของ Step นี้
+
+การออกแบบ connection pooling layer ที่ดีไม่ใช่แค่ "ติดตั้ง PgBouncer แล้วจบ" แต่ต้อง:
+1. เข้าใจลักษณะการใช้งานของแต่ละ tier (web/API vs worker vs reporting) และเลือก pool mode ที่เหมาะสมกับแต่ละ tier แยกกัน
+2. แยก pool ตาม tier/use case เพื่อป้องกันไม่ให้ traffic ประเภทหนึ่งไปกระทบ traffic ประเภทสำคัญกว่า (isolation)
+3. คำนวณ sizing ให้สอดคล้องกับทรัพยากรจริงของ PostgreSQL server ไม่ใช่ตั้งตามความรู้สึก
+4. เตรียม monitoring และทดสอบ load ล่วงหน้าก่อนเหตุการณ์สำคัญ (เช่น flash sale) เสมอ
+
+---
+
 ## สรุปท้ายบท
 
 ### ตารางเปรียบเทียบ PgBouncer vs Pgpool-II
@@ -1095,7 +1213,3 @@ SELECT usename, passwd FROM pg_shadow WHERE usename IN ('app_user', 'worker_user
 8. **แจ้งทีมและเตรียม runbook** สำหรับขั้นตอนที่ต้องทำถ้า pool saturate จริงระหว่าง sale (เช่นคำสั่ง `PAUSE`/`RESUME`, การเพิ่ม pool_size แบบ dynamic ผ่าน `RELOAD` โดยไม่ downtime)
 
 </details>
-
----
-
-**บทถัดไป**: [Part 067 — Load Balancing](./part-067-load-balancing.md)
