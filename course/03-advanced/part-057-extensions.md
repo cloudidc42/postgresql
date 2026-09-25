@@ -1262,14 +1262,8 @@ query ที่ถูกเรียกบ่อยมาก ๆ (หลัก�
 
 ```sql
 SELECT
-    query,
-    calls,
-    shared_blks_hit,
-    shared_blks_read,
-    round(
-        100.0 * shared_blks_hit / NULLIF(shared_blks_hit + shared_blks_read, 0),
-        2
-    ) AS cache_hit_pct
+    query, calls, shared_blks_hit, shared_blks_read,
+    round(100.0 * shared_blks_hit / NULLIF(shared_blks_hit + shared_blks_read, 0), 2) AS cache_hit_pct
 FROM pg_stat_statements
 WHERE shared_blks_hit + shared_blks_read > 0
 ORDER BY cache_hit_pct ASC NULLS LAST
@@ -1311,24 +1305,16 @@ SELECT * FROM products WHERE product_name ILIKE '%mouse%';
 ### 6. Dashboard สรุปภาพรวมแบบเดียวจบ
 
 ```sql
-SELECT
-    'Total unique queries' AS metric, count(*)::text AS value
-FROM pg_stat_statements
-UNION ALL
-SELECT 'Total calls across all queries', sum(calls)::text
-FROM pg_stat_statements
-UNION ALL
-SELECT 'Total execution time (sec)', round(sum(total_exec_time)/1000, 2)::text
+SELECT count(*) AS unique_queries, sum(calls) AS total_calls,
+       round(sum(total_exec_time)::numeric/1000, 2) AS total_sec
 FROM pg_stat_statements;
 ```
 
 ```
-              metric               |   value
--------------------------------------+------------
- Total unique queries               | 47
- Total calls across all queries     | 105318
- Total execution time (sec)         | 126.45
-(3 rows)
+ unique_queries | total_calls | total_sec
+-----------------+--------------+-----------
+              47 |       105318 |    126.45
+(1 row)
 ```
 
 ควรรัน query เชิงสรุปเหล่านี้เป็นประจำ (เช่นทุกเช้าผ่าน dashboard หรือ cron job แจ้งเตือน) เพื่อจับความผิดปกติแต่เนิ่น ๆ ก่อนที่ query ตัวใดตัวหนึ่งจะกลายเป็นปัญหาใหญ่ในช่วง peak traffic
