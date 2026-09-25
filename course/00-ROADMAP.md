@@ -66,16 +66,16 @@
 
 | Part | Steps | หัวข้อ | สถานะ |
 |---|---|---|---|
-| 041 | 401–410 | Index พื้นฐาน: B-Tree และหลักการทำงาน | ⬜ |
-| 042 | 411–420 | Index ขั้นสูง: Hash, GiST, GIN, BRIN, SP-GiST | ⬜ |
-| 043 | 421–430 | Partial Index, Expression Index, Multi-column Index | ⬜ |
-| 044 | 431–440 | Query Planner และการอ่าน EXPLAIN / EXPLAIN ANALYZE | ⬜ |
-| 045 | 441–450 | เทคนิค Query Optimization | ⬜ |
-| 046 | 451–460 | PL/pgSQL: Stored Procedures และ Functions เบื้องต้น | ⬜ |
-| 047 | 461–470 | PL/pgSQL ขั้นสูง: Loop, Exception Handling, Dynamic SQL | ⬜ |
-| 048 | 471–480 | Triggers และ Trigger Functions | ⬜ |
-| 049 | 481–490 | Custom Data Types, Domains, ENUM | ⬜ |
-| 050 | 491–500 | Arrays: การสร้าง จัดเก็บ และ Query | ⬜ |
+| 041 | 401–410 | Index พื้นฐาน: B-Tree และหลักการทำงาน | ✅ |
+| 042 | 411–420 | Index ขั้นสูง: Hash, GiST, GIN, BRIN, SP-GiST | ✅ |
+| 043 | 421–430 | Partial Index, Expression Index, Multi-column Index | ✅ |
+| 044 | 431–440 | Query Planner และการอ่าน EXPLAIN / EXPLAIN ANALYZE | ✅ |
+| 045 | 441–450 | เทคนิค Query Optimization | ✅ |
+| 046 | 451–460 | PL/pgSQL: Stored Procedures และ Functions เบื้องต้น | ✅ |
+| 047 | 461–470 | PL/pgSQL ขั้นสูง: Loop, Exception Handling, Dynamic SQL | ✅ |
+| 048 | 471–480 | Triggers และ Trigger Functions | ✅ |
+| 049 | 481–490 | Custom Data Types, Domains, ENUM | ✅ |
+| 050 | 491–500 | Arrays: การสร้าง จัดเก็บ และ Query | ✅ |
 | 051 | 501–510 | JSON และ JSONB พื้นฐาน | ⬜ |
 | 052 | 511–520 | JSONB Query ขั้นสูงและ Indexing (GIN) | ⬜ |
 | 053 | 521–530 | Full Text Search (tsvector, tsquery, ranking) | ⬜ |
