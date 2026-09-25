@@ -615,47 +615,7 @@ async function createOrderWithStockDeduction(customerId, items) {
 
 ### Savepoint สำหรับ transaction ที่ซับซ้อน
 
-หากต้องการ rollback เพียงบางส่วนของ transaction โดยไม่ยกเลิกทั้งหมด สามารถใช้ `SAVEPOINT`:
-
-```javascript
-async function createOrderWithOptionalDiscount(customerId, items, discountCode) {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-
-    const orderResult = await client.query(
-      `INSERT INTO orders (customer_id, status) VALUES ($1, 'pending') RETURNING order_id`,
-      [customerId]
-    );
-    const orderId = orderResult.rows[0].order_id;
-
-    if (discountCode) {
-      await client.query('SAVEPOINT before_discount');
-      try {
-        const discountResult = await client.query(
-          'SELECT discount_percent FROM discount_codes WHERE code = $1 AND is_active = true',
-          [discountCode]
-        );
-        if (discountResult.rowCount === 0) {
-          // discount code ไม่ถูกต้อง -> rollback เฉพาะส่วนนี้ แต่ order ยังคงอยู่
-          await client.query('ROLLBACK TO SAVEPOINT before_discount');
-          console.warn('โค้ดส่วนลดไม่ถูกต้อง ดำเนินการสร้าง order ต่อโดยไม่มีส่วนลด');
-        }
-      } catch (discountErr) {
-        await client.query('ROLLBACK TO SAVEPOINT before_discount');
-      }
-    }
-
-    await client.query('COMMIT');
-    return { orderId };
-  } catch (err) {
-    await client.query('ROLLBACK');
-    throw err;
-  } finally {
-    client.release();
-  }
-}
-```
+หากต้องการ rollback เพียงบางส่วนของ transaction โดยไม่ยกเลิกทั้งหมด สามารถใช้ `SAVEPOINT` ภายใน transaction เดียวกันได้ เช่น `await client.query('SAVEPOINT before_discount')` แล้วถ้าขั้นตอนถัดไปล้มเหลวก็สั่ง `await client.query('ROLLBACK TO SAVEPOINT before_discount')` เพื่อย้อนกลับเฉพาะส่วนนั้น โดยที่งานส่วนก่อนหน้า savepoint (เช่น การสร้าง order) ยังคงอยู่และรอ `COMMIT` ตามปกติเมื่อ transaction จบ
 
 ### Helper function สำหรับหุ้ม transaction pattern
 
@@ -1747,10 +1707,7 @@ const order = await prisma.order.create({
 });
 ```
 
-```sql
--- เทียบเท่ากับการเช็คก่อนแล้วค่อยตัดสินใจ insert หรือ join กับที่มีอยู่ ภายใน transaction เดียว
--- (Prisma จัดการ race condition ผ่าน unique constraint + upsert-like logic ภายใน)
-```
+Prisma แปล `connectOrCreate` เป็น logic เทียบเท่าการเช็คก่อนว่ามี record ที่ตรงเงื่อนไข `where` อยู่แล้วหรือไม่ ถ้ามีก็เชื่อม (connect) กับของเดิม ถ้าไม่มีก็ `INSERT` ใหม่ ทั้งหมดภายใน transaction เดียวเพื่อป้องกัน race condition
 
 ### interactive transaction: เมื่อ nested write ยังไม่พอ
 
@@ -2056,9 +2013,7 @@ module.exports = router;
 
 ### ส่วนที่ 2: REST API เดียวกัน ด้วย Prisma
 
-```prisma
-// prisma/schema.prisma (ใช้ schema จาก Step 866)
-```
+`GET /products`, `GET /products/:id`, และ `POST /products` เขียนด้วย Prisma โดยใช้ pattern เดียวกับที่แสดงไว้แล้วใน Step 867 ทุกประการ (`findMany` + `count` สำหรับ pagination, `findUnique` สำหรับดึงรายตัว, `create` สำหรับสร้างใหม่) จึงขอไม่แสดงซ้ำในที่นี้ — หัวข้อนี้แสดงเฉพาะส่วนที่มีความแตกต่างจาก node-postgres อย่างชัดเจน คือ conditional atomic update และ nested-write transaction:
 
 ```javascript
 // db/prisma.js
@@ -2074,68 +2029,13 @@ module.exports = prisma;
 ```
 
 ```javascript
-// routes/products.prisma.js
+// routes/products.prisma.js (แสดงเฉพาะ endpoint ที่ต่างจาก node-postgres อย่างมีนัยสำคัญ)
 const express = require('express');
 const router = express.Router();
 const prisma = require('../db/prisma');
 
-router.get('/', async (req, res) => {
-  const page = Math.max(1, parseInt(req.query.page) || 1);
-  const pageSize = Math.min(100, parseInt(req.query.pageSize) || 20);
-
-  try {
-    const [data, total] = await prisma.$transaction([
-      prisma.product.findMany({
-        orderBy: { productId: 'asc' },
-        skip: (page - 1) * pageSize,
-        take: pageSize,
-      }),
-      prisma.product.count(),
-    ]);
-
-    res.json({ data, pagination: { page, pageSize, total } });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'เกิดข้อผิดพลาดในการดึงข้อมูลสินค้า' });
-  }
-});
-
-router.get('/:id', async (req, res) => {
-  const productId = parseInt(req.params.id, 10);
-  if (Number.isNaN(productId)) {
-    return res.status(400).json({ error: 'product id ไม่ถูกต้อง' });
-  }
-
-  try {
-    const product = await prisma.product.findUnique({ where: { productId } });
-    if (!product) {
-      return res.status(404).json({ error: 'ไม่พบสินค้า' });
-    }
-    res.json(product);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'เกิดข้อผิดพลาดในการดึงข้อมูลสินค้า' });
-  }
-});
-
-router.post('/', async (req, res) => {
-  const { productName, unitPrice, stockQuantity } = req.body;
-
-  if (!productName || unitPrice == null || stockQuantity == null) {
-    return res.status(400).json({ error: 'กรุณาระบุข้อมูลให้ครบถ้วน' });
-  }
-
-  try {
-    const product = await prisma.product.create({
-      data: { productName, unitPrice, stockQuantity },
-    });
-    res.status(201).json(product);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'เกิดข้อผิดพลาดในการสร้างสินค้า' });
-  }
-});
-
+// PATCH /products/:id/stock — ต้องใช้ raw SQL เพราะ Prisma query builder
+// ยังไม่รองรับเงื่อนไข "stock_quantity + delta >= 0" ใน WHERE โดยตรง
 router.patch('/:id/stock', async (req, res) => {
   const productId = parseInt(req.params.id, 10);
   const { delta } = req.body;
@@ -2145,7 +2045,6 @@ router.patch('/:id/stock', async (req, res) => {
   }
 
   try {
-    // ใช้ raw SQL สำหรับ conditional atomic update ที่ Prisma query builder ทำเงื่อนไขนี้ไม่ได้ตรงๆ
     const rows = await prisma.$queryRaw`
       UPDATE products
       SET stock_quantity = stock_quantity + ${delta}
@@ -2162,13 +2061,14 @@ router.patch('/:id/stock', async (req, res) => {
   }
 });
 
+// DELETE /products/:id — Prisma throw error code P2025 เมื่อไม่พบ record ที่จะลบ
 router.delete('/:id', async (req, res) => {
   const productId = parseInt(req.params.id, 10);
   try {
     await prisma.product.delete({ where: { productId } });
     res.status(204).send();
   } catch (err) {
-    if (err.code === 'P2025') { // Prisma error code: record not found
+    if (err.code === 'P2025') {
       return res.status(404).json({ error: 'ไม่พบสินค้า' });
     }
     console.error(err);
@@ -2180,7 +2080,8 @@ module.exports = router;
 ```
 
 ```javascript
-// routes/orders.prisma.js
+// routes/orders.prisma.js — สร้างคำสั่งซื้อพร้อมตัดสต็อกด้วย interactive transaction
+// (เทียบเท่ากับ routes/orders.pg.js ที่เขียนด้วยมือใน BEGIN/COMMIT/ROLLBACK)
 const express = require('express');
 const router = express.Router();
 const prisma = require('../db/prisma');
@@ -2199,9 +2100,7 @@ router.post('/', async (req, res) => {
         throw Object.assign(new Error('ไม่พบลูกค้า'), { statusCode: 404 });
       }
 
-      const newOrder = await tx.order.create({
-        data: { customerId, status: 'pending' },
-      });
+      const newOrder = await tx.order.create({ data: { customerId, status: 'pending' } });
 
       for (const item of items) {
         const updated = await tx.product.updateMany({
@@ -2215,7 +2114,6 @@ router.post('/', async (req, res) => {
           );
         }
       }
-
       return newOrder;
     });
 
@@ -2223,19 +2121,6 @@ router.post('/', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(err.statusCode || 500).json({ error: err.message || 'เกิดข้อผิดพลาดในการสร้างคำสั่งซื้อ' });
-  }
-});
-
-router.get('/', async (req, res) => {
-  try {
-    const orders = await prisma.order.findMany({
-      include: { customer: { select: { firstName: true, email: true } } },
-      orderBy: { orderDate: 'desc' },
-    });
-    res.json(orders);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'เกิดข้อผิดพลาดในการดึงข้อมูลคำสั่งซื้อ' });
   }
 });
 
