@@ -1900,4 +1900,132 @@ List<Order> completed = orderRepository.findByCustomerIdAndStatusInOrderByOrderD
 </details>
 
 <details>
-<summary><b>แบบฝึกหัดที่ 9:</b> ในสถานการณ์ที่มีหลาย request พยายามสั่งซื้อสินค้าชิ้นสุดท้ายพร้อมกัน (concurrent order) จงอธิบายว่าทำไมโค้ดต่อไปนี้จึงมีปัญหา race condition และเสนอวิธีแก้ด้วย pessimistic lock
+<summary><b>แบบฝึกหัดที่ 9:</b> ในสถานการณ์ที่มีหลาย request พยายามสั่งซื้อสินค้าชิ้นสุดท้ายพร้อมกัน (concurrent order) จงอธิบายว่าทำไมโค้ดต่อไปนี้จึงมีปัญหา race condition และเสนอวิธีแก้ด้วย pessimistic lock</summary>
+
+```java
+@Transactional
+public Order placeOrderUnsafe(Integer productId, int quantity) {
+    Product product = productRepository.findById(productId)
+            .orElseThrow(); // ❌ ไม่มี lock ใด ๆ
+
+    if (product.getStockQuantity() < quantity) {
+        throw new IllegalStateException("สต็อกไม่พอ");
+    }
+
+    product.setStockQuantity(product.getStockQuantity() - quantity);
+    // ... สร้าง Order ...
+}
+```
+
+**เฉลย:**
+
+**ทำไมถึงมีปัญหา:** `findById` แบบธรรมดาไม่ได้ล็อกแถวที่อ่านมา หาก request A และ request B เข้ามาพร้อมกันในเวลาไล่เลี่ยกัน ทั้งสอง transaction จะอ่านค่า `stockQuantity` เดิมได้พร้อมกัน (สมมติว่าคงเหลือ 1 ชิ้น) ทั้งคู่จะเห็นว่า `1 >= quantity` ผ่านเงื่อนไข ทั้งคู่จะคำนวณ `stockQuantity - 1 = 0` แล้ว update ทับกัน ผลลัพธ์คือมีคำสั่งซื้อสำเร็จ 2 รายการ แต่สินค้าเหลือแค่ 1 ชิ้น (**overselling**) — นี่คือ classic **lost update problem** ที่เกิดจาก isolation level `READ_COMMITTED` (ค่า default ของ PostgreSQL) ซึ่งไม่ได้ป้องกัน race condition แบบนี้โดยอัตโนมัติ
+
+**วิธีแก้ด้วย Pessimistic Lock:**
+
+```java
+public interface ProductRepository extends JpaRepository<Product, Integer> {
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT p FROM Product p WHERE p.productId = :id")
+    Optional<Product> findByIdForUpdate(@Param("id") Integer id);
+}
+
+@Transactional
+public Order placeOrderSafe(Integer productId, int quantity) {
+    // แปลงเป็น SELECT ... FOR UPDATE — transaction ที่มาทีหลังจะถูก "บล็อก"
+    // ให้รอจนกว่า transaction แรกจะ commit/rollback เสร็จก่อน
+    Product product = productRepository.findByIdForUpdate(productId)
+            .orElseThrow();
+
+    if (product.getStockQuantity() < quantity) {
+        throw new IllegalStateException("สต็อกไม่พอ");
+    }
+
+    product.setStockQuantity(product.getStockQuantity() - quantity);
+    // ... สร้าง Order ...
+    return order;
+}
+```
+
+เมื่อ request A ล็อกแถวสินค้าไว้ด้วย `FOR UPDATE` แล้ว request B ที่พยายามอ่านแถวเดียวกันด้วย `FOR UPDATE` เช่นกันจะต้อง**รอ**จนกว่า transaction ของ A จะ commit หรือ rollback เสร็จสิ้นก่อน เมื่อ B ได้ล็อกแล้วจึงจะเห็นค่า `stockQuantity` ที่ A อัปเดตไปแล้วจริง ทำให้การตรวจสอบเงื่อนไข `stockQuantity < quantity` ถูกต้องเสมอ ไม่มีทางเกิด overselling
+
+**ทางเลือกอื่น**: ใช้ **optimistic locking** ผ่าน `@Version` แทนได้เช่นกัน หากคาดว่าการชนกันของ transaction เกิดขึ้นไม่บ่อย (เพราะ optimistic lock ไม่ต้องรอคิว แต่จะ throw `OptimisticLockException` ให้ retry แทนเมื่อชนกันจริง) หรือใช้เงื่อนไขใน `WHERE` clause ตรง ๆ แบบ atomic UPDATE (`UPDATE products SET stock_quantity = stock_quantity - ? WHERE product_id = ? AND stock_quantity >= ?`) ซึ่งอาศัย atomicity ของ single-row UPDATE ใน PostgreSQL โดยไม่ต้องพึ่ง lock explicit เลย
+
+</details>
+
+<details>
+<summary><b>แบบฝึกหัดที่ 10:</b> เขียน Spring Data JPA Repository method พร้อม Service layer สำหรับ "ค้นหาสินค้าที่ใกล้หมดสต็อก" (stock_quantity น้อยกว่าค่าที่กำหนด) และ REST endpoint สำหรับเรียกใช้งาน โดยต้องคืนผลลัพธ์เรียงจากสต็อกน้อยที่สุดก่อน</summary>
+
+**เฉลย:**
+
+**Repository:**
+
+```java
+public interface ProductRepository extends JpaRepository<Product, Integer> {
+
+    List<Product> findByStockQuantityLessThanOrderByStockQuantityAsc(Integer threshold);
+}
+```
+
+**Service:**
+
+```java
+@Service
+public class ProductService {
+
+    private final ProductRepository productRepository;
+
+    public ProductService(ProductRepository productRepository) {
+        this.productRepository = productRepository;
+    }
+
+    @Transactional(readOnly = true)
+    public List<Product> findLowStock(int threshold) {
+        return productRepository.findByStockQuantityLessThanOrderByStockQuantityAsc(threshold);
+    }
+}
+```
+
+**Controller:**
+
+```java
+@RestController
+@RequestMapping("/api/products")
+public class ProductController {
+
+    private final ProductService productService;
+
+    public ProductController(ProductService productService) {
+        this.productService = productService;
+    }
+
+    @GetMapping("/low-stock")
+    public List<ProductResponse> lowStock(
+            @RequestParam(defaultValue = "10") int threshold) {
+
+        return productService.findLowStock(threshold)
+                .stream()
+                .map(ProductResponse::from)
+                .toList();
+    }
+}
+```
+
+**ทดสอบ:**
+
+```bash
+curl "http://localhost:8080/api/products/low-stock?threshold=50"
+```
+
+จุดสำคัญ: ชื่อ method `findByStockQuantityLessThanOrderByStockQuantityAsc` ถูกแยกวิเคราะห์เป็น `WHERE stock_quantity < ? ORDER BY stock_quantity ASC` โดย Spring Data JPA โดยอัตโนมัติ ไม่ต้องเขียน SQL หรือ JPQL เองเลย และ endpoint กำหนดค่า default ของ `threshold` ไว้ที่ 10 ผ่าน `@RequestParam(defaultValue = "10")` เพื่อให้เรียกใช้งานได้สะดวกแม้ไม่ส่ง query parameter มา
+
+</details>
+
+---
+
+## บทถัดไป
+
+เมื่อเข้าใจการเชื่อมต่อ PostgreSQL จากแอปพลิเคชัน Java ระดับเดียว (monolith/single service) แล้ว บทถัดไปจะขยายขอบเขตไปสู่สถาปัตยกรรมระดับ microservices ที่มีหลายบริการเชื่อมต่อกับฐานข้อมูลเดียวกันหรือหลายฐานข้อมูล พร้อมรูปแบบการออกแบบ (pattern) ที่จำเป็นสำหรับระบบกระจาย (distributed system)
+
+ไปยังบทถัดไป: [Part 091 — Microservices Patterns](./part-091-microservices-patterns.md)

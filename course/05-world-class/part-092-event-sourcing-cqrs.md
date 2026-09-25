@@ -1564,4 +1564,144 @@ REFRESH MATERIALIZED VIEW post_listing_read_model;
 </details>
 
 <details>
-<summary><b>แบบฝึกหัดที่ 9:</b> จงเขียนฟังก์ชัน command `cmd_remove_item` ที่รองรับการลบสินค้าออกจาก order (event type `ItemRemoved`) พร้อมตรวจสอบว่าสินค้านั้นมีอยู่ในตะกร้าจริงและ order ยังไม่ถูก ship/cancel
+<summary><b>แบบฝึกหัดที่ 9:</b> จงเขียนฟังก์ชัน command <code>cmd_remove_item</code> ที่รองรับการลบสินค้าออกจาก order (event type <code>ItemRemoved</code>) พร้อมตรวจสอบว่าสินค้านั้นมีอยู่ในตะกร้าจริงและ order ยังไม่ถูก ship/cancel</summary>
+
+**เฉลย:**
+
+```sql
+CREATE OR REPLACE FUNCTION cmd_remove_item(
+    p_aggregate_id UUID,
+    p_sku VARCHAR(50),
+    p_quantity INTEGER
+) RETURNS BIGINT AS $$
+DECLARE
+    v_state JSONB;
+    v_matching_item JSONB;
+    v_new_event_id BIGINT;
+BEGIN
+    v_state := replay_order_state(p_aggregate_id);
+
+    IF v_state IS NULL THEN
+        RAISE EXCEPTION 'ไม่พบ order aggregate_id = %', p_aggregate_id;
+    END IF;
+
+    IF v_state->>'status' != 'created' THEN
+        RAISE EXCEPTION 'ไม่สามารถลบสินค้าได้ เพราะ order อยู่ในสถานะ % แล้ว', v_state->>'status';
+    END IF;
+
+    -- ตรวจสอบว่าสินค้านี้มีอยู่ในตะกร้าจริง และจำนวนที่จะลบไม่เกินจำนวนที่มี
+    SELECT elem INTO v_matching_item
+    FROM jsonb_array_elements(v_state->'items') AS elem
+    WHERE elem->>'sku' = p_sku;
+
+    IF v_matching_item IS NULL THEN
+        RAISE EXCEPTION 'ไม่พบสินค้า sku=% ในตะกร้าของ order นี้', p_sku;
+    END IF;
+
+    IF (v_matching_item->>'quantity')::int < p_quantity THEN
+        RAISE EXCEPTION 'จำนวนที่ต้องการลบ (%) มากกว่าจำนวนที่มีอยู่ในตะกร้า (%)',
+            p_quantity, v_matching_item->>'quantity';
+    END IF;
+
+    INSERT INTO order_events (aggregate_id, event_type, event_data, event_version)
+    VALUES (
+        p_aggregate_id,
+        'ItemRemoved',
+        jsonb_build_object(
+            'sku', p_sku,
+            'quantity', p_quantity,
+            'unit_price', (v_matching_item->>'unit_price')::numeric
+        ),
+        (v_state->>'version')::INTEGER + 1
+    )
+    RETURNING event_id INTO v_new_event_id;
+
+    RETURN v_new_event_id;
+END;
+$$ LANGUAGE plpgsql;
+```
+
+จุดสำคัญของ command handler นี้คือการตรวจสอบ invariant สองชั้นก่อนเขียน event เสมอ: (1) order ต้องยังอยู่ในสถานะ `created` เท่านั้น ห้ามแก้ไขตะกร้าของ order ที่ shipped/cancelled ไปแล้ว และ (2) สินค้าที่จะลบต้องมีอยู่จริงและจำนวนต้องเพียงพอ — ทั้งหมดนี้ตรวจสอบโดยการ `replay_order_state()` ก่อนเสมอ ซึ่งสะท้อนหลักการสำคัญของ Event Sourcing ว่า **ทุก command ต้องอ่าน state ล่าสุดก่อนตัดสินใจเขียน event ใหม่**
+</details>
+
+<details>
+<summary><b>แบบฝึกหัดที่ 10:</b> จงออกแบบและอธิบายกลยุทธ์สำหรับปัญหาต่อไปนี้: ทีมพัฒนาต้องการเพิ่ม read model ใหม่ชื่อ <code>order_analytics_read_model</code> เพื่อรายงานยอดขายรายวันแยกตาม SKU โดยไม่กระทบระบบที่ใช้งานอยู่ในปัจจุบัน (ทั้ง write model และ read model เดิม)</summary>
+
+**เฉลย:**
+
+ขั้นตอนกลยุทธ์ที่แนะนำ:
+
+1. **ไม่ต้องแตะ write model เลย** — เพราะ event store (`order_events`) เป็น append-only และ schema-agnostic (payload เป็น JSONB) อยู่แล้ว read model ใหม่ใด ๆ อ่าน event เดิมได้โดยไม่ต้อง migrate หรือแก้ event structure
+
+2. **สร้างตาราง read model ใหม่แยกต่างหาก:**
+
+```sql
+CREATE TABLE order_analytics_read_model (
+    sale_date   DATE NOT NULL,
+    sku         VARCHAR(50) NOT NULL,
+    total_quantity INTEGER NOT NULL DEFAULT 0,
+    total_revenue  NUMERIC(14,2) NOT NULL DEFAULT 0,
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (sale_date, sku)
+);
+```
+
+3. **เขียน trigger หรือ event handler ใหม่แยกต่างหาก** ที่ subscribe เฉพาะ event type `ItemAdded` (event type เดียวที่เกี่ยวข้องกับรายงานนี้) โดยไม่แตะ trigger เดิมของ `order_summary_read_model` เลย:
+
+```sql
+CREATE OR REPLACE FUNCTION project_order_analytics()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.event_type = 'ItemAdded' THEN
+        INSERT INTO order_analytics_read_model (sale_date, sku, total_quantity, total_revenue)
+        VALUES (
+            NEW.created_at::date,
+            NEW.event_data->>'sku',
+            (NEW.event_data->>'quantity')::int,
+            (NEW.event_data->>'quantity')::numeric * (NEW.event_data->>'unit_price')::numeric
+        )
+        ON CONFLICT (sale_date, sku) DO UPDATE
+            SET total_quantity = order_analytics_read_model.total_quantity + EXCLUDED.total_quantity,
+                total_revenue = order_analytics_read_model.total_revenue + EXCLUDED.total_revenue,
+                updated_at = now();
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_project_order_analytics
+    AFTER INSERT ON order_events
+    FOR EACH ROW EXECUTE FUNCTION project_order_analytics();
+```
+
+4. **Backfill ข้อมูลย้อนหลังด้วยการ replay event stream ทั้งหมดที่มีอยู่แล้ว** (นี่คือจุดที่ Event Sourcing ให้ประโยชน์ชัดเจนที่สุด เพราะข้อมูลย้อนหลังยังอยู่ครบใน event store):
+
+```sql
+-- Backfill ครั้งเดียวเพื่อดึงข้อมูล ItemAdded event ในอดีตทั้งหมดมาคำนวณ
+INSERT INTO order_analytics_read_model (sale_date, sku, total_quantity, total_revenue)
+SELECT
+    created_at::date AS sale_date,
+    event_data->>'sku' AS sku,
+    SUM((event_data->>'quantity')::int) AS total_quantity,
+    SUM((event_data->>'quantity')::numeric * (event_data->>'unit_price')::numeric) AS total_revenue
+FROM order_events
+WHERE event_type = 'ItemAdded'
+GROUP BY created_at::date, event_data->>'sku'
+ON CONFLICT (sale_date, sku) DO UPDATE
+    SET total_quantity = EXCLUDED.total_quantity,
+        total_revenue = EXCLUDED.total_revenue,
+        updated_at = now();
+```
+
+5. **Deploy โดยไม่ downtime** — เนื่องจาก trigger ใหม่นี้เป็น `AFTER INSERT` ที่แยกจาก trigger เดิมโดยสิ้นเชิง (คนละ function, คนละ trigger object) การเพิ่มเข้ามาไม่กระทบ trigger เดิมที่อัปเดต `order_summary_read_model` เลย และไม่ต้อง lock ตาราง `order_events` เป็นเวลานาน (แค่ `CREATE TRIGGER` ซึ่งเร็วมาก)
+
+จุดสำคัญที่ทำให้กลยุทธ์นี้เป็นไปได้อย่างปลอดภัยคือหลักการพื้นฐานของ Event Sourcing + CQRS: **write model ไม่เคยรับรู้ถึงการมีอยู่ของ read model ใด ๆ เลย** (loose coupling) การเพิ่ม, แก้ไข, หรือลบ read model จึงทำได้อย่างอิสระ ตราบใดที่ event store ยังคงมีข้อมูลครบถ้วน — นี่คือคุณค่าหลักของสถาปัตยกรรมนี้ในระยะยาว
+</details>
+
+---
+
+## บทถัดไป
+
+บทถัดไปจะพาไปสำรวจการนำ PostgreSQL ไปใช้งานจริงในสภาพแวดล้อม container และ orchestration ระดับ production ด้วย Docker และ Kubernetes
+
+**[Part 093: PostgreSQL กับ Docker และ Kubernetes →](./part-093-docker-kubernetes.md)**
