@@ -278,6 +278,26 @@ Reviewer จะ apply patch, ทดสอบ, อ่านโค้ด, แล�
 4. **Recent bug reports ใน pgsql-bugs archive** — บั๊กที่รายงานเข้ามาแต่ยังไม่มีใครสืบสวนต่อ บางเคสเป็นแค่ documentation ผิด แก้ได้ไม่ยาก
 5. **`git log --grep="Reported-by"`** ในซอร์สโค้ด — ดูว่าบั๊กที่ผ่านมาแก้กันแบบไหน เพื่อเรียนรู้ระดับของ fix ที่ยอมรับได้
 
+### ตัวอย่างการสร้างและส่ง Patch ด้วย git
+
+เมื่อแก้ไขโค้ดหรือเอกสารเสร็จแล้ว ควรสร้าง patch ด้วย `git format-patch` แทน `git diff` ธรรมดา เพราะจะรวม commit message ที่มีคำอธิบายเหตุผลของการแก้ไขไว้ในไฟล์ patch โดยอัตโนมัติ ซึ่งทำให้ reviewer เข้าใจบริบทได้ทันทีโดยไม่ต้องเปิดอ่าน email แยก:
+
+```bash
+git checkout -b fix-partition-pruning-doc
+# ... แก้ไขไฟล์ ...
+git add doc/src/sgml/ddl.sgml
+git commit -m "doc: clarify partition pruning behavior with default partitions
+
+The current wording implies pruning always applies to the default
+partition, which is not accurate when the partition key involves
+expressions. Add a clarifying example."
+
+git format-patch -1 HEAD -o /tmp/patches/
+# ได้ไฟล์ /tmp/patches/0001-doc-clarify-partition-pruning-behavior.patch
+```
+
+จากนั้นแนบไฟล์ `.patch` นี้เข้าไปในอีเมลที่ส่งเข้า mailing list โดยตรง (ไม่ใช่ paste เนื้อหาลงในตัวอีเมล) — รูปแบบนี้ทำให้ reviewer สามารถ `git am` ไฟล์ patch เข้า local branch ของตัวเองได้ทันทีโดยไม่ต้องแก้ไข format ใด ๆ
+
 ### สิ่งที่ต้องเตรียมก่อนเริ่มพัฒนา (Developer Setup)
 
 - สมัคร community account ที่ `postgresql.org` (ใช้บัญชีเดียวกันได้ทั้ง mailing list, Commitfest, bug tracker)
