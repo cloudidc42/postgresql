@@ -1334,4 +1334,91 @@ WAL replay ต้อง idempotent เพราะสถานการณ์ท
 </details>
 
 <details>
-<summary><b>แบบฝึกหัดที่ 7:</b> บน primary มี `pg_current_wal_lsn()` คืนค่า `2A/50000000` และ standby ตัวหนึ่งมี `sent_lsn = 2A/48000000`, `replay_lsn = 2A/40000000` ใน `pg_stat_replication` จงคำนวณ (ก) send lag เป็น byte (ข) replay lag รวมทั้งหมดเป็น byte
+<summary><b>แบบฝึกหัดที่ 7:</b> บน primary มี `pg_current_wal_lsn()` คืนค่า `2A/50000000` และ standby ตัวหนึ่งมี `sent_lsn = 2A/48000000`, `replay_lsn = 2A/40000000` ใน `pg_stat_replication` จงคำนวณ (ก) send lag เป็น byte (ข) replay lag รวมทั้งหมดเป็น byte</summary>
+
+**เฉลย:**
+
+ใช้ `pg_wal_lsn_diff()` ซึ่งคำนวณระยะห่างเป็น byte โดยตรง:
+
+```sql
+-- (ก) send lag: ปริมาณ WAL ที่ primary สร้างแล้วแต่ยังไม่ถูกส่งไปยัง standby
+SELECT pg_wal_lsn_diff('2A/50000000', '2A/48000000') AS send_lag_bytes;
+--  send_lag_bytes
+-- -----------------
+--        134217728   (= 0x08000000 = 128 MB)
+
+-- (ข) replay lag รวม: ปริมาณ WAL ที่ primary สร้างแล้วแต่ standby ยัง replay ไม่ถึง
+SELECT pg_wal_lsn_diff('2A/50000000', '2A/40000000') AS total_replay_lag_bytes;
+--  total_replay_lag_bytes
+-- --------------------------
+--                268435456   (= 0x10000000 = 256 MB)
+```
+
+(ก) send lag = 128 MB — ข้อมูลที่ primary สร้างแล้วแต่ยังไม่ถูกส่งออกไปเลย (อาจเกิดจากเครือข่ายช้า หรือ WAL sender ทำงานช้า)
+
+(ข) total replay lag = 256 MB — ผลรวมของ send lag บวก replay lag (256 - 128 = 128 MB ที่ standby รับมาแล้วแต่ยัง apply ไม่ทัน) ตัวเลขนี้สำคัญเพราะบอกว่าถ้า primary ล่มตอนนี้และต้อง failover ไปที่ standby ตัวนี้ standby จะสูญเสียข้อมูลไปสูงสุด 256 MB ที่ยังไม่ได้ replay (ในกรณี asynchronous replication)
+
+</details>
+
+<details>
+<summary><b>แบบฝึกหัดที่ 8:</b> จากผลลัพธ์ `pg_waldump` ต่อไปนี้ จงอธิบายว่าเกิดอะไรขึ้น และเพราะเหตุใด record ตัวที่สองจึงมีขนาด (`len (rec/tot)`) ใหญ่กว่าตัวอื่นมาก
+
+```
+rmgr: Heap        len (rec/tot):     54/    54, tx:  9001, lsn: 20/10000100, prev 20/100000C8, desc: INSERT off: 5
+rmgr: Heap        len (rec/tot):     58/  8218, tx:  9002, lsn: 20/10000138, prev 20/10000100, desc: UPDATE off: 3, flags: 0x00 FPW
+rmgr: Heap        len (rec/tot):     56/    56, tx:  9002, lsn: 20/10002140, prev 20/10000138, desc: UPDATE off: 4, flags: 0x00
+```</summary>
+
+**เฉลย:**
+
+- Record แรก (`tx: 9001`) เป็นการ `INSERT` แถวใหม่ที่ offset 5 ในเนื้อ heap page ขนาด record ปกติ (54 bytes) — ไม่มี full page image
+- Record ที่สอง (`tx: 9002`) เป็นการ `UPDATE` และมี flag `FPW` (Full Page Write) กำกับอยู่ — สังเกตว่า `len (rec/tot)` คือ `58/8218` แปลว่า record data จริงมีแค่ 58 bytes แต่ total รวม backup block image เป็น 8218 bytes (ประมาณ 8KB) นี่คือหลักฐานว่านี่คือ**การแก้ไข page นี้เป็นครั้งแรกหลัง checkpoint ล่าสุด** ตามกฎของ `full_page_writes` — PostgreSQL จึงต้องแนบสำเนาทั้ง page (FPI) เข้าไปในบันทึกนี้เพื่อป้องกัน torn page
+- Record ที่สาม (`tx: 9002`, ทรานแซกชันเดียวกัน) เป็น `UPDATE` อีกครั้งที่ offset 4 แต่ขนาดกลับมาปกติ (56 bytes) ไม่มี FPW เพราะ page นี้ถูกแก้ไปแล้วครั้งหนึ่งในช่วง checkpoint เดียวกัน (จาก record ที่สอง) จึงมี FPI เป็นฐานที่ปลอดภัยอยู่แล้วใน WAL การแก้ไขครั้งต่อไปจึงบันทึกแค่ delta ได้ตามปกติ
+
+</details>
+
+<details>
+<summary><b>แบบฝึกหัดที่ 9:</b> เพราะเหตุใดการปิด `full_page_writes` (`full_page_writes = off`) จึงเป็นความเสี่ยงในระบบส่วนใหญ่ และมีทางเลือกอื่นใดบ้างที่ช่วยลดปริมาณ WAL โดยไม่ต้องปิดฟีเจอร์นี้</summary>
+
+**เฉลย:**
+
+การปิด `full_page_writes` ทำให้ PostgreSQL ไม่แนบ full page image ในการแก้ไข page ครั้งแรกหลัง checkpoint อีกต่อไป ถ้าเกิด torn page ขึ้นจริง (เช่น ไฟดับระหว่างเขียน 8KB page แล้วสำเร็จแค่บางส่วน) WAL replay จะพยายาม apply delta ลงบน page ที่เสียหายอยู่แล้ว ซึ่งไม่สามารถซ่อมส่วนที่เสียหายได้ ผลคือข้อมูลเสียหายถาวร กู้คืนไม่ได้ผ่านกลไก WAL ปกติ ความเสี่ยงนี้จะเกิดขึ้นจริงก็ต่อเมื่อ storage/filesystem ไม่รับประกัน atomic 8KB write เท่านั้น (ซึ่งเป็นกรณีส่วนใหญ่ของ disk/filesystem ทั่วไป)
+
+ทางเลือกอื่นที่ปลอดภัยกว่าในการลดปริมาณ WAL:
+- เพิ่ม `checkpoint_timeout` และ `max_wal_size` ให้ checkpoint ห่างขึ้น ลดความถี่ที่แต่ละ page ต้องแนบ FPI ใหม่
+- เปิด `wal_compression = on` (เลือกอัลกอริทึมได้ เช่น `pglz`, `lz4`, `zstd`) เพื่อบีบอัดเฉพาะส่วน full page image โดยไม่กระทบความปลอดภัย
+- ปรับ workload ให้ลด random write pattern ที่กระจายไปกระทบหลาย page พร้อมกัน (เช่น จัด batch การ update ให้กระทบ page ใกล้เคียงกัน)
+
+</details>
+
+<details>
+<summary><b>แบบฝึกหัดที่ 10:</b> วัด WAL generation rate ได้ว่า workload หนึ่งสร้าง WAL 45 MB ในเวลา 9 วินาที หากต้องการตั้งค่า `max_wal_size` ให้ checkpoint ที่เกิดจากขนาด WAL (ไม่ใช่จากเวลา) ไม่ถี่เกินกว่าทุก 10 นาที ควรตั้ง `max_wal_size` อย่างน้อยเท่าใด</summary>
+
+**เฉลย:**
+
+คำนวณอัตราการสร้าง WAL:
+
+```
+WAL generation rate = 45 MB / 9 วินาที = 5 MB/s
+```
+
+ถ้าต้องการให้ checkpoint (จากสาเหตุ WAL เต็ม) ไม่เกิดถี่กว่าทุก 10 นาที (600 วินาที):
+
+```
+max_wal_size (ขั้นต่ำ) = อัตรา WAL × ระยะเวลาที่ต้องการ
+                       = 5 MB/s × 600 s
+                       = 3000 MB
+                       ≈ 3 GB
+```
+
+ควรตั้ง `max_wal_size` ไว้ที่อย่างน้อย **3 GB** (ในทางปฏิบัติมักตั้งเผื่อเพิ่มอีกสักระยะ เช่น 4-5 GB เพื่อรองรับช่วง workload พีคที่อัตราการสร้าง WAL อาจสูงกว่าค่าเฉลี่ยที่วัดได้) ควบคู่กับการตรวจสอบว่าพื้นที่ดิสก์ของ `pg_wal/` รองรับขนาดนี้ได้จริง และเวลา crash recovery ที่อาจยาวขึ้นตามปริมาณ WAL ที่ต้อง replay ยังอยู่ในระดับที่ยอมรับได้สำหรับ SLA ของระบบ
+
+</details>
+
+---
+
+## บทถัดไป
+
+จากความเข้าใจ WAL เชิงลึกในบทนี้ บทถัดไปจะพาไปสำรวจกลไก **MVCC (Multi-Version Concurrency Control)** ในระดับ internals อย่างละเอียด — ว่า PostgreSQL จัดการหลายเวอร์ชันของแถวข้อมูลพร้อมกันได้อย่างไร ความสัมพันธ์ระหว่าง tuple visibility, transaction ID wraparound และ WAL ที่เพิ่งศึกษาไป
+
+**บทถัดไป:** [Part 084 — MVCC Internals](./part-084-mvcc-internals.md)
