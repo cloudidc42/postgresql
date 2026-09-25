@@ -93,16 +93,16 @@
 
 | Part | Steps | หัวข้อ | สถานะ |
 |---|---|---|---|
-| 061 | 601–610 | Backup Strategies: pg_dump, pg_dumpall, pg_basebackup | ⬜ |
-| 062 | 611–620 | Point-in-Time Recovery (PITR) และ WAL Archiving | ⬜ |
-| 063 | 621–630 | Streaming Replication (Physical Replication) | ⬜ |
-| 064 | 631–640 | Logical Replication และ Publication/Subscription | ⬜ |
-| 065 | 641–650 | High Availability: Patroni, repmgr, Failover Automation | ⬜ |
-| 066 | 651–660 | Connection Pooling: PgBouncer, Pgpool-II | ⬜ |
-| 067 | 661–670 | Load Balancing และ Read Replica Strategy | ⬜ |
-| 068 | 671–680 | Security: Roles, Privileges, GRANT/REVOKE | ⬜ |
-| 069 | 681–690 | Row Level Security (RLS) และ Multi-tenant Security | ⬜ |
-| 070 | 691–700 | SSL/TLS, Encryption at Rest/in Transit | ⬜ |
+| 061 | 601–610 | Backup Strategies: pg_dump, pg_dumpall, pg_basebackup | ✅ |
+| 062 | 611–620 | Point-in-Time Recovery (PITR) และ WAL Archiving | ✅ |
+| 063 | 621–630 | Streaming Replication (Physical Replication) | ✅ |
+| 064 | 631–640 | Logical Replication และ Publication/Subscription | ✅ |
+| 065 | 641–650 | High Availability: Patroni, repmgr, Failover Automation | ✅ |
+| 066 | 651–660 | Connection Pooling: PgBouncer, Pgpool-II | ✅ |
+| 067 | 661–670 | Load Balancing และ Read Replica Strategy | ✅ |
+| 068 | 671–680 | Security: Roles, Privileges, GRANT/REVOKE | ✅ |
+| 069 | 681–690 | Row Level Security (RLS) และ Multi-tenant Security | ✅ |
+| 070 | 691–700 | SSL/TLS, Encryption at Rest/in Transit | ✅ |
 | 071 | 701–710 | Auditing และ Logging (pgAudit, log configuration) | ⬜ |
 | 072 | 711–720 | Monitoring: pg_stat views, Prometheus + Grafana, pganalyze | ⬜ |
 | 073 | 721–730 | Performance Tuning: postgresql.conf ระดับ Production | ⬜ |
