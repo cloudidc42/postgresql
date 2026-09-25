@@ -49,16 +49,16 @@
 | 028 | 271–280 | GROUP BY, HAVING, GROUPING SETS, ROLLUP, CUBE | ✅ |
 | 029 | 281–290 | Window Functions พื้นฐาน: OVER, PARTITION BY | ✅ |
 | 030 | 291–300 | Window Functions ขั้นสูง: RANK, DENSE_RANK, ROW_NUMBER, LAG/LEAD, NTILE | ✅ |
-| 031 | 301–310 | String Functions และ Pattern Matching (regex) | ⬜ |
-| 032 | 311–320 | Date/Time Functions และการคำนวณช่วงเวลา | ⬜ |
-| 033 | 321–330 | Numeric/Math Functions และ Type Casting | ⬜ |
-| 034 | 331–340 | CASE WHEN, COALESCE, NULLIF และ Conditional Logic | ⬜ |
-| 035 | 341–350 | Views: การสร้างและใช้งาน Virtual Table | ⬜ |
-| 036 | 351–360 | Materialized Views และการ REFRESH | ⬜ |
-| 037 | 361–370 | Transactions และหลักการ ACID | ⬜ |
-| 038 | 371–380 | Isolation Levels และปัญหา Concurrency (dirty read, phantom read) | ⬜ |
-| 039 | 381–390 | Sequences, SERIAL, IDENTITY Columns | ⬜ |
-| 040 | 391–400 | โปรเจกต์รวมระดับกลาง: ระบบร้านค้าออนไลน์ (E-Commerce Schema) | ⬜ |
+| 031 | 301–310 | String Functions และ Pattern Matching (regex) | ✅ |
+| 032 | 311–320 | Date/Time Functions และการคำนวณช่วงเวลา | ✅ |
+| 033 | 321–330 | Numeric/Math Functions และ Type Casting | ✅ |
+| 034 | 331–340 | CASE WHEN, COALESCE, NULLIF และ Conditional Logic | ✅ |
+| 035 | 341–350 | Views: การสร้างและใช้งาน Virtual Table | ✅ |
+| 036 | 351–360 | Materialized Views และการ REFRESH | ✅ |
+| 037 | 361–370 | Transactions และหลักการ ACID | ✅ |
+| 038 | 371–380 | Isolation Levels และปัญหา Concurrency (dirty read, phantom read) | ✅ |
+| 039 | 381–390 | Sequences, SERIAL, IDENTITY Columns | ✅ |
+| 040 | 391–400 | โปรเจกต์รวมระดับกลาง: ระบบร้านค้าออนไลน์ (E-Commerce Schema) | ✅ |
 
 ## 🟣 ระดับ 3: ระดับสูง (Advanced) — Step 401–600
 
