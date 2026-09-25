@@ -156,6 +156,19 @@
 - **Connection Pooling:** PgBouncer transaction pooling จำเป็นมากเมื่อมี service instance หลักพันตัวที่ต้อง connect เข้า DB พร้อมกัน
 - **Observability:** ต้อง monitor replication lag, cache hit ratio, และ query latency percentile (p99) แบบ real-time เพื่อจับปัญหาก่อนผู้ใช้รู้สึก
 
+### 986.6 วิวัฒนาการของสถาปัตยกรรมตามสเกล (Evolution Timeline)
+
+สิ่งสำคัญที่มักถูกมองข้ามคือ FeedFlow **ไม่ได้เกิดมาพร้อมสถาปัตยกรรมข้างต้นตั้งแต่วันแรก** ระบบทุกระบบเติบโตเป็นขั้นบันได และการลงทุนสร้างความซับซ้อนของ sharding/fan-out ตั้งแต่ผู้ใช้ยังมีไม่กี่พันคนคือ **premature optimization** ที่สิ้นเปลืองโดยใช่เหตุ ตารางด้านล่างแสดงเส้นทางวิวัฒนาการที่สมเหตุสมผล:
+
+| ระยะ | ขนาดผู้ใช้ (DAU) | สถาปัตยกรรมที่เหมาะสม | สัญญาณที่บอกว่าต้องขยับไประยะถัดไป |
+|---|---|---|---|
+| เริ่มต้น | < 10,000 | PostgreSQL เครื่องเดียว, ไม่มี cache, query ตรง | latency p99 เริ่มเกิน 200ms, CPU primary สูงต่อเนื่อง |
+| เติบโต | 10,000 – 1 ล้าน | เพิ่ม read replica 1-2 ตัว + cache layer (Redis) สำหรับ query ที่ query ซ้ำบ่อย | replica lag เริ่มกระทบ UX, cache hit ratio ต่ำกว่า 80% |
+| ขยายใหญ่ | 1 ล้าน – 20 ล้าน | เพิ่ม read replica เป็นสิบตัว, cache แบบ tiered, เริ่มแยก service ตามโดเมน (feed/post/graph) | primary รับ write throughput ไม่ไหว, storage เดี่ยวเข้าใกล้ขีดจำกัด disk |
+| ระดับ Enterprise | 20 ล้าน+ | Sharding ตาม user_id, hybrid fan-out, geo-distributed replica | เมื่อถึงจุดนี้แล้วการไม่ shard หมายถึง single point of failure ทางธุรกิจทั้งหมด |
+
+หลักคิดสำคัญคือ **อย่า shard ก่อนที่จะจำเป็นจริง ๆ** เพราะ sharding เพิ่ม operational complexity มหาศาล (schema migration ต้องรันทุก shard, cross-shard query ทำไม่ได้ตรง ๆ, debugging ยากขึ้น) — ทีมวิศวกรรมที่ดีจะ **ยืดอายุของสถาปัตยกรรมแบบง่ายให้นานที่สุดเท่าที่ทำได้** โดยใช้ vertical scaling, indexing ที่ดี, และ caching ให้ถึงขีดสุดก่อน แล้วจึงขยับไปสู่ความซับซ้อนที่สูงขึ้นเมื่อมีหลักฐานชัดเจนว่าจำเป็นจริง ๆ เท่านั้น (data-driven scaling decision ไม่ใช่ scaling ตามความกลัว)
+
 ---
 
 ## Step 987: Case Study 2 — ระบบ Fintech / Payment: ACID เข้มงวด, Audit Trail และ Compliance
@@ -276,6 +289,20 @@
 - **Replication & High Availability:** synchronous vs asynchronous replication, quorum commit
 - **Backup & PITR:** WAL archiving, point-in-time recovery สำหรับ compliance และ disaster recovery
 - **Security (RLS, Encryption):** การจำกัดสิทธิ์เข้าถึงข้อมูลตาม role และ tenant
+
+### 987.6 กรณีศึกษาย่อย: เมื่อ Reconciliation Job พบยอดไม่ตรงกัน
+
+เพื่อให้เห็นภาพว่า "defense in depth" ทำงานอย่างไรในทางปฏิบัติ ลองพิจารณาสถานการณ์ incident สมมติ: ทุกคืนเวลาตี 2 ระบบ PayCore จะรัน **reconciliation job** ที่ตรวจสอบว่าผลรวมของทุก ledger entry ในแต่ละบัญชีเท่ากับยอดคงเหลือที่ cache ไว้หรือไม่ (SUM ของ debit/credit ทั้งหมดต้องเท่ากับ balance snapshot) คืนหนึ่ง job พบว่ามีบัญชีหนึ่งยอดไม่ตรงกันเป็นจำนวนเล็กน้อย
+
+**ขั้นตอนที่ระบบและทีมงานควรทำ (runbook แบบย่อ):**
+
+1. **Alert ทันทีระดับ Sev-1** — ต่างจากระบบอื่นที่ยอมรับ error rate เล็กน้อยได้ ระบบการเงินต้อง alert ทุกครั้งที่ reconciliation ไม่ balance แม้แต่สตางค์เดียว เพราะนี่คือสัญญาณของบั๊กที่อาจกระทบบัญชีอื่นด้วย
+2. **หยุดการประมวลผลธุรกรรมใหม่ของบัญชีที่มีปัญหาชั่วคราว (freeze)** โดยไม่กระทบบัญชีอื่นในระบบ (ตัวอย่างของ blast radius containment)
+3. **ตรวจสอบ audit log แบบ append-only** ย้อนหลังเพื่อดูว่า ledger entry ใดที่ทำให้ยอดไม่ตรง เนื่องจากตาราง ledger เป็น append-only การสืบสวนจึงทำได้แม่นยำ 100% (ไม่มีข้อมูลถูกเขียนทับ)
+4. **แก้ไขด้วยการเพิ่ม correcting entry ใหม่ ไม่ใช่แก้ไขข้อมูลเดิม** — หลักการบัญชีคือห้ามลบ/แก้ entry เก่าเด็ดขาด แม้จะพบว่าผิดพลาด ต้องเพิ่ม entry ใหม่ที่ "แก้ไขผล" แทน เพื่อรักษาความสมบูรณ์ของ audit trail
+5. **Post-incident review** เพื่อหาสาเหตุที่รากเหง้า (root cause) และปรับปรุงกลไกป้องกันชั้นที่เกี่ยวข้อง (เช่น ถ้าสาเหตุมาจาก retry ที่ idempotency key ตรวจจับไม่ทัน ต้องปรับ logic การเช็ค key)
+
+กรณีศึกษาย่อยนี้แสดงให้เห็นว่า "audit trail ที่แก้ไขไม่ได้" (Step 987.3 ข้อ 1) ไม่ใช่แค่ข้อกำหนด compliance บนกระดาษ แต่เป็นเครื่องมือสืบสวนที่ใช้งานจริงเมื่อเกิดปัญหา และการ "ห้ามแก้ข้อมูลเก่า" คือหลักการเดียวกับที่นักบัญชีใช้มาเป็นร้อยปีก่อนที่จะมีฐานข้อมูล เพียงแต่ตอนนี้ PostgreSQL เป็นผู้บังคับใช้กฎนี้ผ่าน schema design แทนวินัยของมนุษย์
 
 ---
 
@@ -416,6 +443,20 @@ RETURNING stock;
 - **Connection Pooling:** ในช่วง spike จำนวน connection ที่พยายามเปิดพร้อมกันอาจทำให้ PostgreSQL ล่มจาก connection exhaustion หากไม่มี pooler กั้นไว้
 - **CQRS/Event Sourcing:** การแยก read model กับ write model สำหรับ inventory
 - **Observability:** ต้องมี dashboard ที่ monitor lock wait time และ transaction throughput แบบ real-time ในช่วง event สำคัญ พร้อมทีม on-call เฝ้าระวังเป็นพิเศษ
+
+### 988.6 Timeline เหตุการณ์จริงในคืน Black Friday (นาทีต่อนาที)
+
+เพื่อให้เห็นภาพว่าการตัดสินใจทางสถาปัตยกรรมทั้งหมดถูกนำมาใช้จริงอย่างไรในสถานการณ์กดดัน ลองไล่ timeline สมมติของทีม on-call ในคืนเปิดดีลใหญ่:
+
+- **T-30 นาที:** ทีมเปิด virtual waiting room ที่ edge layer ล่วงหน้า, เพิ่มจำนวน read replica ชั่วคราว (pre-scaling ตามที่คาดการณ์ไว้ล่วงหน้า แทนที่จะรอ auto-scaling ตอบสนอง), แจ้งเตือนทีม on-call ทั้งหมดให้พร้อมเฝ้าระวัง
+- **T-0 (เวลาเปิดดีล):** traffic พุ่งขึ้นทันที 40 เท่าภายใน 60 วินาที — virtual waiting room เริ่มทำงาน ปล่อย request เข้าระบบเป็นอัตราที่ควบคุมได้ แทนที่จะปล่อยทั้งหมดพร้อมกัน
+- **T+2 นาที:** dashboard แสดง lock wait time บนสินค้า flash-sale บางรายการเริ่มสูงขึ้น (มากกว่า 500ms) — Redis pre-check layer เริ่มกรอง request ที่ "ไม่มีทางสำเร็จ" ออกไปได้ตามคาด ลด transaction ที่ไปถึง PostgreSQL ลงกว่า 90%
+- **T+5 นาที:** สินค้า flash-sale บางรายการหมดสต็อกจริง — atomic conditional UPDATE ทำงานถูกต้อง ไม่มี oversell แม้แต่ชิ้นเดียวตามการตรวจสอบหลัง event
+- **T+8 นาที:** CPU ของ read replica pool เริ่มสูงเกิน 85% จาก traffic การ browse สินค้าที่ไม่เกี่ยวกับ flash-sale — ระบบเปิด feature flag graceful degradation อัตโนมัติ ปิด recommendation engine ชั่วคราวเพื่อสงวน capacity ให้ checkout path
+- **T+15 นาที:** traffic เริ่มคงที่ในระดับสูงแต่ควบคุมได้ ทีม on-call ค่อย ๆ ผ่อนคลาย rate limit ที่ virtual waiting room ให้ผู้ใช้เข้าระบบได้มากขึ้น
+- **T+60 นาที:** เปิด recommendation engine กลับมาเมื่อโหลดลดลงสู่ระดับปกติ, เริ่มกระบวนการ post-event review
+
+Timeline นี้แสดงให้เห็นว่า **สถาปัตยกรรมที่ดีไม่ได้ทำงานแบบ all-or-nothing** แต่เป็นระบบของกลไกหลายชั้นที่ทำงานร่วมกันแบบ graduated response — แต่ละชั้นเปิดใช้งานตามระดับความรุนแรงของสถานการณ์ ไม่ใช่ทุกกลไกทำงานเต็มกำลังตลอดเวลา
 
 ---
 
@@ -674,4 +715,108 @@ RETURNING stock;
 TenantHub (Case Study 4) เริ่มต้นด้วย RLS สำหรับทุก tenant แต่เมื่อมี tenant enterprise รายใหญ่รายหนึ่งเซ็นสัญญาที่กำหนดว่า **ข้อมูลต้องอยู่ในสหภาพยุโรปเท่านั้น (data residency)** และห้ามแชร์ infrastructure กับลูกค้ารายอื่น จงวิเคราะห์ว่าทีมควรทำอย่างไร โดยไม่กระทบ tenant รายอื่นที่ยังอยู่บน shared RLS model
 
 <details>
-<summary>เฉลย
+<summary>เฉลย</summary>
+
+นี่คือสถานการณ์คลาสสิกที่นำไปสู่กลยุทธ์ hybrid ตามที่อธิบายในหัวข้อ 989.3(4) ทีมควร "ย้าย" (migrate) เฉพาะ tenant enterprise รายนี้ออกจาก shared RLS database ไปยัง **database-per-tenant แยกต่างหากที่ตั้งอยู่ใน region สหภาพยุโรป (EU)** โดยมีขั้นตอนคร่าว ๆ ดังนี้:
+
+1. **Provision database instance ใหม่ใน EU region** ผ่าน control plane / Infrastructure as Code ที่มี schema เดียวกันกับ shared database (ใช้ migration script ชุดเดียวกัน เพื่อรับประกันความสอดคล้องของ schema)
+2. **Export ข้อมูลของ tenant นั้นออกจาก shared database** โดยกรองด้วย `tenant_id` (ใช้ `pg_dump` พร้อม `--where` หรือ custom export script) แล้ว import เข้า instance ใหม่
+3. **อัปเดต routing/control plane layer** ให้รู้ว่า tenant นี้ต้อง route ไปยัง connection string ของ database ใหม่แทนที่จะผ่าน RLS-shared pool (คล้ายกับ routing layer ที่ใช้ใน sharding ของ Case Study 1)
+4. **ลบข้อมูลของ tenant นั้นออกจาก shared database** หลังยืนยันว่าการย้ายสำเร็จและ verify ความถูกต้องของข้อมูลแล้ว (reconciliation check)
+5. **ทดสอบ cutover แบบมี rollback plan** เช่น เปิด dual-write ชั่วคราว หรือมี maintenance window สั้น ๆ เพื่อป้องกัน data loss ระหว่างการย้าย
+
+จุดสำคัญคือ tenant รายอื่นที่ยังอยู่บน shared RLS model **จะไม่ได้รับผลกระทบใด ๆ** เพราะ RLS policy, schema, และ application code ส่วนกลางไม่ต้องเปลี่ยนแปลง — สิ่งที่เปลี่ยนคือ routing layer ที่รู้จักเพิ่ม "ปลายทาง" ใหม่สำหรับ tenant พิเศษรายนี้เท่านั้น นี่คือเหตุผลที่การออกแบบ **control plane ที่รองรับ hybrid tenancy ตั้งแต่ต้น** (แม้ในช่วงแรกจะยังไม่มี tenant ที่ต้อง dedicate จริง) เป็นการลงทุนที่คุ้มค่าระยะยาว เพราะช่วยให้การขยายสถาปัตยกรรมในอนาคตไม่ต้อง refactor ระบบทั้งหมด
+</details>
+
+### แบบฝึกหัดที่ 5
+
+เปรียบเทียบเหตุผลที่ FeedFlow (Case Study 1) เลือกใช้ asynchronous replication เป็นหลัก ในขณะที่ PayCore (Case Study 2) เลือกใช้ synchronous replication จงอธิบายว่าถ้าสลับกลยุทธ์ replication ของทั้งสองระบบ (เอา FeedFlow ไปใช้ synchronous, เอา PayCore ไปใช้ asynchronous) จะเกิดผลเสียอะไรกับแต่ละระบบ
+
+<details>
+<summary>เฉลย</summary>
+
+**ถ้า FeedFlow ใช้ synchronous replication:** ทุก write (โพสต์, like, comment) ที่มีปริมาณสูงถึง 50,000-80,000 ครั้งต่อวินาทีในช่วง peak จะต้องรอให้ standby (อาจอยู่คนละภูมิภาค) ยืนยันรับ WAL ก่อนตอบ client ว่าสำเร็จ ด้วยจำนวน write ที่สูงมากและ standby ที่กระจายตามภูมิภาคเพื่อ availability ผลคือ **latency ของทุก write เพิ่มขึ้นอย่างมีนัยสำคัญ** (อาจเพิ่มจากไม่กี่ ms เป็นหลักสิบหรือหลักร้อย ms ถ้า standby อยู่ไกล) และที่แย่กว่านั้นคือ **throughput สูงสุดของระบบทั้งหมดจะถูกจำกัดด้วยความเร็วของ standby ที่ช้าที่สุด** ซึ่งขัดกับเป้าหมายหลักของ FeedFlow ที่ต้องการ scale การเขียนให้สูงที่สุดเท่าที่ทำได้ ในขณะที่ธุรกิจไม่ได้ต้องการ RPO=0 ขนาดนั้น (สูญเสีย like หนึ่งครั้งไม่ใช่หายนะ) จึงเป็นการลงทุนที่ไม่คุ้มค่าอย่างชัดเจน
+
+**ถ้า PayCore ใช้ asynchronous replication:** ระบบจะได้ latency ต่ำลงและ throughput สูงขึ้น แต่จะสูญเสีย **การรับประกัน RPO=0** ทันที — หาก primary ล่มก่อนที่ WAL จะถูกส่งไปถึง standby (สถานการณ์ที่เกิดขึ้นได้จริงเสมอ ไม่ว่าความน่าจะเป็นจะต่ำแค่ไหน) transaction ทางการเงินที่เพิ่ง COMMIT สำเร็จจะหายไปพร้อมกับ primary หมายถึงเงินของลูกค้าหายไปโดยไม่มีทางกู้คืน ซึ่งเป็นความเสี่ยงที่ยอมรับไม่ได้ในธุรกิจการเงิน ทั้งในแง่ความเชื่อถือของลูกค้าและในแง่กฎหมาย/compliance ที่มักกำหนดให้ระบบการเงินต้องพิสูจน์ได้ว่าไม่มี transaction ใดสูญหาย
+
+บทเรียนคือ **การเลือก replication mode ไม่ใช่การเลือก "แบบที่ดีที่สุด" แบบสัมบูรณ์ แต่ต้องเลือกให้สอดคล้องกับ RPO/RTO ที่ธุรกิจกำหนด** ซึ่งต่างกันไปตามความเสี่ยงที่แต่ละระบบยอมรับได้
+</details>
+
+### แบบฝึกหัดที่ 6
+
+ในช่วง Black Friday ทีมงาน ShopScale สังเกตว่า `pg_stat_activity` แสดง transaction จำนวนมากอยู่ในสถานะ `active` แต่ค้างนานผิดปกติ (waiting) โดยเฉพาะที่พยายาม UPDATE แถวสินค้า flash-sale เดียวกัน จงอธิบายว่าเกิดอะไรขึ้นในเชิงเทคนิค และเสนอวิธีแก้ 2 แนวทางที่ไม่ต้องเปลี่ยน schema
+
+<details>
+<summary>เฉลย</summary>
+
+สิ่งที่เกิดขึ้นคือ **row-level lock contention บน hot row** — เมื่อ transaction จำนวนมากพยายาม `UPDATE` แถวสินค้าเดียวกันพร้อมกัน PostgreSQL จะอนุญาตให้เพียง transaction เดียวถือ lock บนแถวนั้นได้ในแต่ละขณะ (ตาม MVCC/row-level locking ตามที่เรียนใน Part 058) transaction อื่นที่พยายาม UPDATE แถวเดียวกันจะต้อง **รอ (block)** จนกว่า transaction ก่อนหน้าจะ commit หรือ rollback เมื่อมีคนแย่งซื้อพร้อมกันหลักหมื่นคน จำนวน transaction ที่ต่อคิวรอจะสะสมเป็นแถวยาว (queueing) ทำให้ transaction ที่มาทีหลังต้องรอนานขึ้นเรื่อย ๆ (คล้ายปรากฏการณ์ traffic jam) และหาก connection pool มีจำนวนจำกัด transaction ที่ค้างรอเหล่านี้จะกิน connection slot ไปเรื่อย ๆ จนอาจทำให้ request อื่นที่ไม่เกี่ยวข้องกับสินค้าตัวนี้ได้รับผลกระทบไปด้วย (connection starvation)
+
+วิธีแก้ที่ไม่ต้องเปลี่ยน schema:
+
+1. **เพิ่ม pre-check layer ด้วย Redis atomic counter ก่อนแตะ PostgreSQL** — ใช้ `DECR` แบบ atomic ใน Redis เพื่อกรอง request ที่ "ไม่มีทางสำเร็จ" ออกไปตั้งแต่ต้นทาง (เช่นถ้า counter ติดลบแล้วให้ reject ทันทีโดยไม่ยิง query เข้า DB เลย) ลดจำนวน transaction ที่มาแย่ง row lock ที่ PostgreSQL ลงอย่างมาก แม้จะไม่ได้แก้ที่ต้นเหตุ (ยังมี hot row เดิม) แต่ลดปริมาณที่มาถึง DB ได้มหาศาล
+2. **ตั้ง statement_timeout หรือ lock_timeout ที่เหมาะสมสำหรับ transaction เหล่านี้** เพื่อไม่ให้ transaction ค้างรอ lock นานเกินไปจนกิน connection slot — ถ้า transaction รอ lock เกินเวลาที่กำหนด ให้ error กลับไปทันที (fail fast) แทนที่จะปล่อยให้ connection ถูกยึดครองอยู่เรื่อย ๆ ทำให้ connection pool ยังมี slot ว่างสำหรับ request อื่น ๆ ที่ไม่เกี่ยวข้องกับสินค้าตัวนี้
+
+ทั้งสองวิธีนี้ไม่ต้องแก้ schema ของตาราง inventory แต่จัดการที่ระดับ application/infrastructure layer ซึ่งเป็นแนวทางที่ปลอดภัยกว่าในสถานการณ์ที่กำลังเกิด incident จริง (deploy schema change ระหว่าง peak traffic มีความเสี่ยงสูงกว่าการปรับ config)
+</details>
+
+### แบบฝึกหัดที่ 7
+
+TenantHub มีลูกค้ารายหนึ่งร้องขอ (ตามสิทธิ์ GDPR "right to be forgotten") ให้ลบข้อมูลทั้งหมดของบริษัทตนออกจากระบบภายใน 30 วัน จงเปรียบเทียบว่าคำขอนี้ทำได้ยากง่ายต่างกันอย่างไร ถ้าระบบใช้ (ก) RLS shared schema (ข) schema-per-tenant (ค) database-per-tenant
+
+<details>
+<summary>เฉลย</summary>
+
+**(ก) RLS shared schema:** ยากที่สุด เพราะข้อมูลของ tenant นี้กระจายปะปนอยู่กับ tenant อื่นในทุกตารางของ shared schema การลบต้องเขียน script ที่ `DELETE FROM <table> WHERE tenant_id = X` วนทุกตารางในระบบอย่างระมัดระวัง (ต้องครบทุกตารางจริง ๆ ไม่ตกหล่นแม้แต่ตารางเดียว มิฉะนั้นถือว่าไม่ compliant) ต้องคำนึงถึง foreign key constraint และลำดับการลบที่ถูกต้อง อีกทั้งข้อมูลใน backup/WAL archive เก่ายังอาจมีร่องรอยของ tenant นี้หลงเหลืออยู่ (ต้องมีนโยบาย backup retention/purge แยกต่างหากเพื่อจัดการส่วนนี้)
+
+**(ข) Schema-per-tenant:** ง่ายกว่ามาก เพราะสามารถใช้คำสั่งเดียว `DROP SCHEMA tenant_x CASCADE` เพื่อลบข้อมูลทั้งหมดของ tenant นั้นได้ในทีเดียว โดยไม่กระทบ schema ของ tenant อื่นเลย ยังคงต้องจัดการเรื่อง backup/archive แยกต่างหากเช่นเดิม แต่ส่วนของ live database ทำได้สะดวกและรวดเร็ว
+
+**(ค) Database-per-tenant:** ง่ายที่สุด เพียงแค่ `DROP DATABASE` (หรือ terminate instance ทั้งหมด) ก็ลบข้อมูลของ tenant นั้นได้ครบถ้วนในคำสั่งเดียว รวมถึง backup ที่แยกต่างหากต่อ instance ก็จัดการ/purge ได้ตรงไปตรงมากว่า เพราะไม่ปะปนกับ tenant อื่นตั้งแต่ต้น
+
+ข้อสรุปคือ **ระดับของ data isolation ทางสถาปัตยกรรมส่งผลโดยตรงต่อความง่ายในการปฏิบัติตามข้อกำหนดทางกฎหมายเกี่ยวกับข้อมูลส่วนบุคคล** ซึ่งเป็นอีกหนึ่งปัจจัยที่ควรนำมาชั่งน้ำหนักตั้งแต่ตอนเลือกกลยุทธ์ multi-tenancy ไม่ใช่พิจารณาแค่เรื่องต้นทุนและ performance เท่านั้น
+</details>
+
+### แบบฝึกหัดที่ 8
+
+จงยกตัวอย่างการนำหลักการ "Defense in Depth" (จาก Step 990.1) มาประยุกต์ใช้กับระบบใดระบบหนึ่งที่ไม่ใช่ 4 case study ในบทนี้ (เช่น ระบบ booking ตั๋ว, ระบบ inventory คลังสินค้าทั่วไป, หรือระบบอื่นที่คุณคุ้นเคย) โดยระบุอย่างน้อย 3 ชั้นการป้องกัน
+
+<details>
+<summary>เฉลย</summary>
+
+ตัวอย่างคำตอบ (ระบบจองตั๋วภาพยนตร์/ที่นั่ง ซึ่งมีปัญหาคล้าย flash-sale ของ ShopScale):
+
+1. **ชั้นที่ 1 — Application/UX layer:** แสดงที่นั่งที่ "กำลังถูกคนอื่นจอง" แบบ real-time (soft lock ชั่วคราวด้วย TTL สั้น ๆ ใน Redis) เพื่อลดโอกาสที่คนสองคนจะพยายามจองที่นั่งเดียวกันตั้งแต่ต้น แม้จะไม่ใช่การป้องกันที่รับประกัน 100% (เป็นแค่ UX hint) แต่ช่วยลด traffic ที่จะไปถึงชั้นถัดไป
+2. **ชั้นที่ 2 — Database constraint layer:** ใช้ `UNIQUE` constraint บนคู่ `(showtime_id, seat_number)` ในตาราง bookings ร่วมกับ atomic `INSERT ... ON CONFLICT DO NOTHING` — ถ้ามีสอง transaction พยายาม insert การจองที่นั่งเดียวกันพร้อมกัน PostgreSQL จะรับประกันด้วย unique index ว่ามีเพียง insert เดียวเท่านั้นที่สำเร็จ (เป็นชั้นการป้องกันที่รับประกันความถูกต้อง 100% ไม่ว่า application layer ด้านบนจะมี bug หรือไม่)
+3. **ชั้นที่ 3 — Transaction/timeout layer:** กำหนด `lock_timeout` และใช้ transaction ที่ commit เร็ว (short transaction) เพื่อไม่ให้การจองที่นั่งหนึ่งค้างนานจนกระทบระบบโดยรวม พร้อมมี background job ที่ยกเลิกการจองที่ "ค้าง" เกินเวลาที่กำหนด (เช่น จองไว้แต่ยังไม่จ่ายเงินภายใน 10 นาที) เพื่อปลดปล่อยที่นั่งกลับคืนสู่ inventory
+
+แต่ละชั้นทำหน้าที่ต่างกัน — ชั้นแรกลดโอกาสเกิดปัญหา (prevention), ชั้นที่สองรับประกันความถูกต้องแม้ชั้นแรกล้มเหลว (guarantee), ชั้นที่สามจัดการผลข้างเคียงระยะยาว (cleanup/recovery) นี่คือแก่นของ defense in depth — แต่ละชั้นไม่ต้องสมบูรณ์แบบ แต่รวมกันแล้วปิดช่องโหว่ซึ่งกันและกัน
+</details>
+
+### แบบฝึกหัดที่ 9
+
+หากคุณเป็น Staff Engineer และถูกถามในการสัมภาษณ์งานว่า "ออกแบบระบบ inventory ของ e-commerce ที่รองรับ Black Friday ให้หน่อย" จงร่างคำตอบสั้น ๆ (5-8 ประโยค) ที่แสดงกระบวนการคิดแบบมีลำดับขั้น (ไม่ใช่แค่ท่องเทคนิค) โดยอ้างอิงแนวทางจาก Case Study 3
+
+<details>
+<summary>เฉลย</summary>
+
+ตัวอย่างแนวคำตอบ: "ก่อนอื่นผมจะถามกลับก่อนว่า traffic pattern เป็นแบบ spike ฉับพลันหรือค่อย ๆ เพิ่ม และสินค้าที่ concern คือสินค้าทั่วไปหรือสินค้า flash-sale จำนวนจำกัดที่มีคนแย่งกันซื้อพร้อมกันมาก เพราะคำตอบจะต่างกัน สำหรับสินค้าทั่วไป ผมจะแยก read path (แสดงข้อมูลสินค้า, browse) ออกจาก write path (checkout) โดย read ใช้ cache+replica ได้เต็มที่เพราะยอมรับความคลาดเคลื่อนเล็กน้อยได้ ส่วน write ต้องยิงไปที่ primary เท่านั้น สำหรับสินค้า flash-sale ที่เป็น hot row ผมจะใช้ atomic conditional UPDATE (`UPDATE ... WHERE stock > 0 RETURNING stock`) เป็นกลไกป้องกัน oversell ระดับ database ซึ่งเป็นด่านสุดท้ายที่รับประกันความถูกต้องเสมอ แล้วเสริมด้วย pre-check layer ที่ Redis เพื่อกรอง request ที่ไม่มีทางสำเร็จออกก่อนถึง DB ลด lock contention ผมจะเสริมด้วย traffic shaping ที่ edge เช่น virtual waiting room เพื่อไม่ให้ spike ทั้งหมดถล่มระบบพร้อมกัน และสุดท้ายผมจะออกแบบ graceful degradation ไว้ล่วงหน้า เช่นปิดฟีเจอร์ recommendation ที่ไม่จำเป็นเมื่อโหลดสูงเกินขีด เพื่อรักษา checkout path ซึ่งเป็นหัวใจของธุรกิจให้ทำงานได้เสมอ"
+
+คำตอบแบบนี้แสดงให้เห็นว่าผู้ตอบคิดเป็นลำดับ (clarify requirement → แยกปัญหาตาม pattern การใช้งาน → เลือกกลไกป้องกันที่ database layer ก่อนเป็นอันดับแรกเพราะเชื่อถือได้สุด → เสริมชั้นป้องกันอื่นเพื่อลดโหลด → เตรียมแผนสำรองเมื่อระบบเกินขีดจำกัด) ซึ่งเป็นสิ่งที่ผู้สัมภาษณ์ระดับ Staff/Principal มองหา มากกว่าการท่องชื่อเทคนิคโดด ๆ
+</details>
+
+### แบบฝึกหัดที่ 10
+
+พิจารณาสถานการณ์สมมติ: TenantHub ตัดสินใจใช้ RLS shared schema กับ tenant ทั้งหมด 8,000 ราย และเริ่มพบว่า query บางตัวช้าลงเรื่อย ๆ เมื่อ dataset โตขึ้น จงวิเคราะห์ว่าอะไรคือสาเหตุที่เป็นไปได้มากที่สุด (2 ข้อ) และแต่ละข้อแก้ไขอย่างไรโดยยังคงใช้ RLS shared schema ต่อไป (ไม่ต้องย้ายไป schema/database-per-tenant)
+
+<details>
+<summary>เฉลย</summary>
+
+**สาเหตุที่เป็นไปได้ข้อที่ 1 — Index ไม่มี `tenant_id` เป็น leading column:** ถ้า index ถูกสร้างโดยไม่ได้คำนึงถึง RLS filter เช่น สร้าง index บน `(created_at)` เฉยๆ แทนที่จะเป็น `(tenant_id, created_at)` query planner แม้จะได้ผลลัพธ์ถูกต้องจาก RLS policy ที่กรอง `tenant_id` ให้ แต่จะต้อง scan ข้อมูลของหลายพัน tenant ปนกันก่อนกรองออก (index ไม่ selective พอสำหรับ query ที่ scope อยู่แค่ tenant เดียว) วิธีแก้คือ **สร้าง composite index ที่มี `tenant_id` เป็นคอลัมน์แรกเสมอ** สำหรับทุกตารางและทุก query pattern ที่ใช้บ่อย เพื่อให้ query planner สามารถ narrow ลงมาที่ข้อมูลของ tenant เดียวได้อย่างมีประสิทธิภาพตั้งแต่ต้น
+
+**สาเหตุที่เป็นไปได้ข้อที่ 2 — Data skew ระหว่าง tenant (บาง tenant มีข้อมูลมากกว่า tenant อื่นมหาศาล):** ถ้ามี tenant รายใหญ่บางรายที่มีข้อมูลมากกว่า tenant เล็กหลายร้อยเท่า (เช่น tenant องค์กรใหญ่ที่มีพนักงานหลายพันคนเทียบกับ tenant startup 5 คน) table statistics ที่ query planner ใช้ตัดสินใจ (ผ่าน `ANALYZE`) อาจไม่สะท้อนความจริงสำหรับ tenant ที่ query อยู่ ณ ขณะนั้น ทำให้ planner เลือก execution plan ที่ไม่เหมาะสม (เช่น เลือก seq scan ทั้งที่ควร index scan หรือกลับกัน) วิธีแก้คือการปรับ `default_statistics_target` ให้สูงขึ้นสำหรับคอลัมน์ที่มี skew สูง เพื่อให้ planner เก็บสถิติละเอียดขึ้น และพิจารณาใช้ **partial index หรือ partitioning ภายในตาราง** (เช่น partition ตามช่วงของ tenant_id หรือตามขนาด tenant) เพื่อแยก tenant ใหญ่ออกจาก tenant เล็กในระดับ physical storage แม้จะยังอยู่ใน logical shared schema เดียวกันก็ตาม รวมถึงพิจารณาย้าย tenant ใหญ่ที่สุดไม่กี่รายไปยัง dedicated resource ตามแนวทาง hybrid ที่กล่าวถึงในหัวข้อ 989.3(4) หากปัญหายังไม่คลี่คลายด้วยวิธีข้างต้น
+</details>
+
+---
+
+## บทถัดไป
+
+บทนี้เป็นการสังเคราะห์เทคนิคทั้งหมดของหลักสูตรผ่านมุมมองสถาปัตยกรรมระดับ enterprise บทถัดไปจะพาไปสู่การเตรียมตัวสำหรับการรับรองความเชี่ยวชาญและการสัมภาษณ์งานในระดับที่สูงขึ้น อ่านต่อได้ที่ [Part 101: Certification & Interview Preparation](./part-101-certification-interview-prep.md)
