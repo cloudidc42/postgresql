@@ -39,16 +39,16 @@
 
 | Part | Steps | หัวข้อ | สถานะ |
 |---|---|---|---|
-| 021 | 201–210 | JOIN พื้นฐาน: INNER JOIN และการเชื่อมหลายตาราง | ⬜ |
-| 022 | 211–220 | LEFT/RIGHT/FULL OUTER JOIN | ⬜ |
-| 023 | 221–230 | CROSS JOIN, SELF JOIN, NATURAL JOIN | ⬜ |
-| 024 | 231–240 | Subqueries: scalar, correlated, EXISTS/NOT EXISTS | ⬜ |
-| 025 | 241–250 | Common Table Expressions (WITH / CTE) | ⬜ |
-| 026 | 251–260 | Recursive CTE และการใช้งานกับข้อมูลแบบ hierarchy | ⬜ |
-| 027 | 261–270 | Aggregate Functions: COUNT, SUM, AVG, MIN, MAX | ⬜ |
-| 028 | 271–280 | GROUP BY, HAVING, GROUPING SETS, ROLLUP, CUBE | ⬜ |
-| 029 | 281–290 | Window Functions พื้นฐาน: OVER, PARTITION BY | ⬜ |
-| 030 | 291–300 | Window Functions ขั้นสูง: RANK, DENSE_RANK, ROW_NUMBER, LAG/LEAD, NTILE | ⬜ |
+| 021 | 201–210 | JOIN พื้นฐาน: INNER JOIN และการเชื่อมหลายตาราง | ✅ |
+| 022 | 211–220 | LEFT/RIGHT/FULL OUTER JOIN | ✅ |
+| 023 | 221–230 | CROSS JOIN, SELF JOIN, NATURAL JOIN | ✅ |
+| 024 | 231–240 | Subqueries: scalar, correlated, EXISTS/NOT EXISTS | ✅ |
+| 025 | 241–250 | Common Table Expressions (WITH / CTE) | ✅ |
+| 026 | 251–260 | Recursive CTE และการใช้งานกับข้อมูลแบบ hierarchy | ✅ |
+| 027 | 261–270 | Aggregate Functions: COUNT, SUM, AVG, MIN, MAX | ✅ |
+| 028 | 271–280 | GROUP BY, HAVING, GROUPING SETS, ROLLUP, CUBE | ✅ |
+| 029 | 281–290 | Window Functions พื้นฐาน: OVER, PARTITION BY | ✅ |
+| 030 | 291–300 | Window Functions ขั้นสูง: RANK, DENSE_RANK, ROW_NUMBER, LAG/LEAD, NTILE | ✅ |
 | 031 | 301–310 | String Functions และ Pattern Matching (regex) | ⬜ |
 | 032 | 311–320 | Date/Time Functions และการคำนวณช่วงเวลา | ⬜ |
 | 033 | 321–330 | Numeric/Math Functions และ Type Casting | ⬜ |
